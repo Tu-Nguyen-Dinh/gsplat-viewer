@@ -1,9 +1,14 @@
-// --bench: renders an orbit around the scene with several renderer configurations
-// and reports averaged per-stage GPU times, frame time and fragment counts.
+// Offline modes of the viewer:
+//   --bench      renders an orbit with several renderer configurations and reports averaged
+//                per-stage GPU times, frame time and fragment counts
+//   --turntable  saves the frames of an orbit as PNG files
 #include "app/app.h"
 
 #include "gl/framebuffer.h"
 #include "gl/gl_loader.h"
+#include "scene/ply_io.h"
+
+#include <filesystem>
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/constants.hpp>
@@ -147,6 +152,31 @@ int App::runBenchmark(const Options& o) {
     out << (exists ? csv.substr(csv.find('\n') + 1) : csv);  // header only once
     std::printf("Appended results to %s\n", o.benchCsv.c_str());
   }
+  return 0;
+}
+
+int App::runTurntable(const Options& o) {
+  // Offscreen frames of a 360 degree orbit, saved as PNG (turn them into a GIF/video with ffmpeg).
+  std::error_code ec;
+  std::filesystem::create_directories(pathFromUtf8(o.turntableDir), ec);
+  Framebuffer target;
+  target.create(o.width, o.height);
+  const float baseYaw = camera_.yaw;
+  for (int f = 0; f < o.benchFrames; ++f) {
+    camera_.yaw = baseYaw + glm::two_pi<float>() * static_cast<float>(f) / static_cast<float>(o.benchFrames);
+    target.bind();
+    glClearColor(background_.r, background_.g, background_.b, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    splats_.render(makeRenderView(o.width, o.height), splatSettings_);
+    char name[64];
+    std::snprintf(name, sizeof(name), "frame_%04d.png", f);
+    std::string error;
+    if (!savePng(pathFromUtf8(o.turntableDir) / name, readFramebuffer(target.id(), o.width, o.height), error)) {
+      std::fprintf(stderr, "Cannot write frame: %s\n", error.c_str());
+      return 1;
+    }
+  }
+  std::printf("Wrote %d frames to %s\n", o.benchFrames, o.turntableDir.c_str());
   return 0;
 }
 

@@ -1,6 +1,6 @@
 # Benchmarks
 
-Machine: NVIDIA GeForce RTX 3060 (driver 610.88), 12 CPU threads, Windows 11.
+Machine: NVIDIA GeForce RTX 3060 (driver 610.88), Intel Core i5-12400F (6 cores / 12 threads), Windows 11.
 Release build (MinGW GCC 15.2, `-O3`). Offscreen render target **1920×1080**, VSync off.
 Each configuration: 30 warm-up frames, then 240 frames orbiting 360° around the scene
 (the sort order changes every frame). Times are averages of `GL_TIME_ELAPSED` queries.

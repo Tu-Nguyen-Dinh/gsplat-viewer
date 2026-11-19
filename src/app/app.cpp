@@ -122,7 +122,7 @@ int App::run(const Options& o) {
   if (!o.scene.empty()) pendingLoad_ = o.scene;
   else setScene(makeDemoScene());
 
-  if (o.benchmark) {
+  if (o.benchmark || !o.turntableDir.empty()) {
     if (!pendingLoad_.empty()) {
       loadSceneFile(pendingLoad_);
       pendingLoad_.clear();
@@ -132,7 +132,7 @@ int App::run(const Options& o) {
       }
       if (!status_.empty()) std::printf("%s\n", status_.c_str());
     }
-    const int code = scene_.empty() ? 1 : runBenchmark(o);
+    const int code = scene_.empty() ? 1 : o.benchmark ? runBenchmark(o) : runTurntable(o);
     shutdown();
     return code;
   }
@@ -169,14 +169,20 @@ int App::run(const Options& o) {
       handleInput(dt, fbH);
       drawUi();
     }
-    frame(fbW, fbH);
+    frame(0, fbW, fbH);
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-    // A few warm-up frames let the scene load and the GPU timers settle.
+    // A few warm-up frames let the scene load and the GPU timers settle. The image itself is
+    // rendered offscreen at exactly the requested size (the OS may shrink the window).
     if (screenshotMode && !isLoading() && ++frameIndex == 8) {
+      Framebuffer offscreen;
+      offscreen.create(o.width, o.height);
+      frame(offscreen.id(), o.width, o.height);
+      fbW = o.width;
+      fbH = o.height;
       std::string error;
-      if (savePng(pathFromUtf8(o.screenshot), readFramebuffer(0, fbW, fbH), error)) {
+      if (savePng(pathFromUtf8(o.screenshot), readFramebuffer(offscreen.id(), fbW, fbH), error)) {
         const SplatStats& s = splats_.stats();
         std::printf("Saved %s (%dx%d) | %zu splats | %u visible | preprocess %.3f ms | gpu sort %.3f ms"
                     " | cpu sort %.2f ms | draw %.3f ms\n",
@@ -215,8 +221,8 @@ RenderView App::makeRenderView(int w, int h) const {
   return v;
 }
 
-void App::frame(int fbW, int fbH) {
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+void App::frame(GLuint fbo, int fbW, int fbH) {
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
   glViewport(0, 0, fbW, fbH);
   glClearColor(background_.r, background_.g, background_.b, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

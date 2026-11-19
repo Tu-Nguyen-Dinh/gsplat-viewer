@@ -25,7 +25,8 @@ struct Options {
   float cameraPos[3] = {0, 0, 5}, cameraTarget[3] = {0, 0, 0};
   float background[3] = {0.07f, 0.08f, 0.1f};
   bool benchmark = false;      // --bench: measure several renderer configurations and exit
-  int benchFrames = 240;
+  int benchFrames = 240;       // frames per benchmark configuration / turntable frames
+  std::string turntableDir;    // --turntable DIR: save an orbit as PNG frames and exit
   std::string benchCsv;        // append results as CSV rows
 };
 

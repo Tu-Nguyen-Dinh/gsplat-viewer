@@ -25,7 +25,7 @@ class App {
  private:
   bool createWindow(const Options& options);
   void shutdown();
-  void frame(int fbWidth, int fbHeight);
+  void frame(GLuint framebuffer, int width, int height);  // renders the scene into `framebuffer` (0 = window)
 
   void setScene(GaussianScene&& scene);
   void loadSceneFile(const std::string& utf8Path);  // starts a background load
@@ -39,6 +39,7 @@ class App {
   void handleInput(float dt, int fbHeight);
   void drawUi();                             // ui.cpp
   int runBenchmark(const Options& options);  // benchmark.cpp
+  int runTurntable(const Options& options);  // benchmark.cpp
 
   static void onDrop(GLFWwindow* window, int count, const char** paths);
   static void onScroll(GLFWwindow* window, double dx, double dy);

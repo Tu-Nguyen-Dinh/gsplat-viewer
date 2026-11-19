@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # Some dependencies declare very old minimum versions; CMake 4 needs this to configure them.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 
-project(gsplat_viewer VERSION 0.7.0 LANGUAGES C CXX)
+project(gsplat_viewer VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -74,7 +74,8 @@ add_library(gsplat_core STATIC
 
 # third_party/: Khronos GL headers and stb_image_write.h (single-file, vendored).
 target_include_directories(gsplat_core PUBLIC src third_party/khronos PRIVATE third_party/stb)
-target_link_libraries(gsplat_core PUBLIC glfw glm::glm)
+find_package(Threads REQUIRED)  # std::thread / std::async (needs -pthread on Linux)
+target_link_libraries(gsplat_core PUBLIC glfw glm::glm Threads::Threads)
 target_compile_definitions(gsplat_core PUBLIC
   GLFW_INCLUDE_NONE
   GLM_ENABLE_EXPERIMENTAL

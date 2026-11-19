@@ -26,7 +26,8 @@ void printUsage() {
       "  --camera-target X,Y,Z\n"
       "  --background R,G,B   clear color in [0,1]\n"
       "  --bench              benchmark several configurations (orbit), print a table, exit\n"
-      "  --frames N           measured frames per configuration (default 240)\n"
+      "  --frames N           frames per benchmark configuration / turntable (default 240)\n"
+      "  --turntable DIR      save a 360 degree orbit as PNG frames and exit\n"
       "  --csv FILE           append benchmark results to a CSV file\n");
 }
 }  // namespace
@@ -84,6 +85,10 @@ bool parseOptions(int argc, char** argv, Options& o) {
       float* dst = a == "--camera-pos" ? o.cameraPos : a == "--camera-target" ? o.cameraTarget : o.background;
       if (!v || std::sscanf(v, "%f,%f,%f", &dst[0], &dst[1], &dst[2]) != 3) return printUsage(), false;
       if (a != "--background") o.hasCamera = true;
+    } else if (a == "--turntable") {
+      const char* v = next();
+      if (!v) return printUsage(), false;
+      o.turntableDir = v;
     } else if (a == "--bench") {
       o.benchmark = true;
     } else if (a == "--frames") {
