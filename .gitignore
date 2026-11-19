@@ -1,0 +1,10 @@
+build/
+out/
+.vscode/
+.idea/
+*.ply
+*.splat
+*.spz
+*.sog
+!assets/.gitkeep
+imgui.ini
