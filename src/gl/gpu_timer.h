@@ -16,16 +16,25 @@ class GpuTimer {
 
   void begin();
   void end();
-  // Exponentially smoothed GPU time in milliseconds.
+  // Exponentially smoothed GPU time in milliseconds (for the UI).
   double milliseconds() const { return smoothedMs_; }
 
+  // Plain average of every sample collected since the last reset (for benchmarks).
+  void resetAverage() { sumMs_ = 0.0, samples_ = 0; }
+  double averageMs() const { return samples_ ? sumMs_ / samples_ : 0.0; }
+  int sampleCount() const { return samples_; }
+
  private:
+  void collect(int slot);
+
   static constexpr int kRing = 4;
   GLuint queries_[kRing] = {};
   bool pending_[kRing] = {};
   int index_ = 0;
   bool created_ = false;
   double smoothedMs_ = 0.0;
+  double sumMs_ = 0.0;
+  int samples_ = 0;
 };
 
 }  // namespace gsv

@@ -99,6 +99,12 @@ int App::run(const Options& o) {
   if (o.yaw > -999.0f) camera_.yaw = o.yaw;
   splatSettings_.debugView = static_cast<DebugView>(o.debugView);
   distanceScale_ = o.distanceScale;
+  background_ = {o.background[0], o.background[1], o.background[2]};
+  if (o.hasCamera) {
+    fixedCamera_ = true;
+    fixedEye_ = {o.cameraPos[0], o.cameraPos[1], o.cameraPos[2]};
+    fixedTarget_ = {o.cameraTarget[0], o.cameraTarget[1], o.cameraTarget[2]};
+  }
   if (!createWindow(o)) {
     if (window_) shutdown();
     return 1;
@@ -115,6 +121,21 @@ int App::run(const Options& o) {
 
   if (!o.scene.empty()) pendingLoad_ = o.scene;
   else setScene(makeDemoScene());
+
+  if (o.benchmark) {
+    if (!pendingLoad_.empty()) {
+      loadSceneFile(pendingLoad_);
+      pendingLoad_.clear();
+      while (isLoading()) {  // nothing else to do: block until the scene is in
+        glfwWaitEventsTimeout(0.01);
+        pollLoading();
+      }
+      if (!status_.empty()) std::printf("%s\n", status_.c_str());
+    }
+    const int code = scene_.empty() ? 1 : runBenchmark(o);
+    shutdown();
+    return code;
+  }
 
   const bool screenshotMode = !o.screenshot.empty();
   showUi_ = !screenshotMode;
@@ -273,6 +294,7 @@ void App::frameScene() {
   }
   camera_.frameBounds(lo, hi);
   camera_.distance *= distanceScale_;
+  if (fixedCamera_) camera_.lookAt(fixedEye_, fixedTarget_);  // explicit camera from the command line
 }
 
 void App::reloadShaders() {

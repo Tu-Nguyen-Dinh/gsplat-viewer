@@ -21,6 +21,12 @@ struct Options {
   int sortMode = 3;            // SortMode: 0 none, 1 cpu-std, 2 cpu-radix, 3 gpu
   int debugView = 0;           // DebugView: 0 color, 1 depth, 2 overdraw, 3 ellipses
   float distanceScale = 1.0f;  // < 1 moves the camera closer than the default framing
+  bool hasCamera = false;      // --camera-pos / --camera-target given
+  float cameraPos[3] = {0, 0, 5}, cameraTarget[3] = {0, 0, 0};
+  float background[3] = {0.07f, 0.08f, 0.1f};
+  bool benchmark = false;      // --bench: measure several renderer configurations and exit
+  int benchFrames = 240;
+  std::string benchCsv;        // append results as CSV rows
 };
 
 // Returns false (and prints usage) on invalid arguments.

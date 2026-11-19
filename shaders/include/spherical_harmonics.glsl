@@ -1,6 +1,12 @@
 // View-dependent color from spherical harmonics (degree 0..3).
-// Requires a buffer `shRest[]` (floats, per splat channel-major: R[n], G[n], B[n])
-// to be declared before this file is included. Mirrors evalSphericalHarmonics() in C++.
+// Mirrors evalSphericalHarmonics() in src/core/gaussian_math.cpp.
+//
+// Requires, before inclusion:
+//   buffer ... { uint shData[]; }   higher-band coefficients of every splat, PLY order
+//                                    (channel-major: R[n], G[n], B[n]) stored either as
+//                                    float32 bits or as packed pairs of float16
+
+uniform int uShHalf;   // 1 = float16 pairs, 0 = float32
 
 const float SH_C0 = 0.28209479177387814;
 const float SH_C1 = 0.4886025119029199;
@@ -10,11 +16,20 @@ const float SH_C3[7] = float[7](-0.5900435899266435, 2.890611442640554, -0.45704
                                 0.3731763325901154, -0.4570457994644658, 1.445305721320277,
                                 -0.5900435899266435);
 
-// Coefficient k (k >= 1) of the splat whose rest block starts at `base`.
+// Value number `idx` of the coefficient block starting at uint offset `base`.
+float shValue(uint base, uint idx) {
+    if (uShHalf != 0) {
+        vec2 pair = unpackHalf2x16(shData[base + (idx >> 1u)]);   // two halves per uint
+        return (idx & 1u) == 0u ? pair.x : pair.y;
+    }
+    return uintBitsToFloat(shData[base + idx]);
+}
+
+// Coefficient k (k >= 1) for the three channels.
 vec3 shCoeff(uint base, uint perChannel, uint k) {
-    return vec3(shRest[base + k - 1u],
-                shRest[base + perChannel + k - 1u],
-                shRest[base + 2u * perChannel + k - 1u]);
+    return vec3(shValue(base, k - 1u),
+                shValue(base, perChannel + k - 1u),
+                shValue(base, 2u * perChannel + k - 1u));
 }
 
 vec3 evalSphericalHarmonics(int degree, vec3 dir, vec3 dc, uint base, uint perChannel) {

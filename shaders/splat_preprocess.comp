@@ -7,7 +7,7 @@
 layout(local_size_x = 256) in;
 
 layout(std430, binding = BINDING_SPLATS)    readonly buffer Splats    { GpuSplat splats[]; };
-layout(std430, binding = BINDING_SH_REST)   readonly buffer ShRest    { float shRest[]; };
+layout(std430, binding = BINDING_SH_REST)   readonly buffer ShRest    { uint shData[]; };
 layout(std430, binding = BINDING_PROJECTED) writeonly buffer Projected { ProjectedSplat projected[]; };
 layout(std430, binding = BINDING_ORDER)     writeonly buffer Order     { uint order[]; };
 layout(std430, binding = BINDING_DRAW_CMD)  buffer DrawCmd   { DrawCommand drawCmd; };
@@ -27,6 +27,7 @@ uniform int uCull;
 uniform vec3 uCameraPos;     // in model space (SH directions are defined there)
 uniform int uShDegree;
 uniform uint uRestPerChannel;
+uniform uint uShStride;      // uints per splat in shData (45 for float32, 23 for float16)
 uniform vec2 uDepthRange;    // (min, 1 / (max - min)) for 16-bit sort keys
 uniform int uKeyBits;        // 16 or 32
 
@@ -53,7 +54,7 @@ void main() {
     }
 
     vec3 dir = normalize(s.positionOpacity.xyz - uCameraPos);
-    vec3 color = evalSphericalHarmonics(uShDegree, dir, s.dc.rgb, i * 3u * uRestPerChannel, uRestPerChannel);
+    vec3 color = evalSphericalHarmonics(uShDegree, dir, s.dc.rgb, i * uShStride, uRestPerChannel);
 
     projected[i].centerDepthRadius = vec4(p.center, p.depth, p.radius);
     projected[i].conicOpacity = vec4(p.conic, s.positionOpacity.w);

@@ -18,6 +18,8 @@ class OrbitCamera {
 
   // Places the camera so the axis-aligned box is fully visible.
   void frameBounds(const glm::vec3& boundsMin, const glm::vec3& boundsMax);
+  // Places the camera at `eye` looking at `center` (inverse of position(): yaw/pitch from the direction).
+  void lookAt(const glm::vec3& eye, const glm::vec3& center);
 
   void orbit(float dxPixels, float dyPixels);
   void pan(float dxPixels, float dyPixels, float viewportHeight);

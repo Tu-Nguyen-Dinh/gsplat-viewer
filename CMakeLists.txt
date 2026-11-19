@@ -90,7 +90,8 @@ add_executable(gsplat_viewer
   src/main.cpp
   src/app/app.cpp
   src/app/ui.cpp
-  src/app/options.cpp)
+  src/app/options.cpp
+  src/app/benchmark.cpp)
 target_link_libraries(gsplat_viewer PRIVATE gsplat_core imgui)
 gsv_warnings(gsplat_viewer)
 

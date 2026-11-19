@@ -15,6 +15,17 @@ void OrbitCamera::frameBounds(const glm::vec3& bmin, const glm::vec3& bmax) {
   farPlane = distance + radius * 50.0f;
 }
 
+void OrbitCamera::lookAt(const glm::vec3& eye, const glm::vec3& center) {
+  target = center;
+  const glm::vec3 offset = eye - center;
+  distance = std::max(glm::length(offset), 1e-4f);
+  const glm::vec3 d = offset / distance;  // = (cos p sin y, sin p, cos p cos y)
+  pitch = std::asin(std::clamp(d.y, -1.0f, 1.0f));
+  yaw = std::atan2(d.x, d.z);
+  nearPlane = std::max(distance * 0.002f, 1e-3f);
+  farPlane = std::max(farPlane, distance * 50.0f);
+}
+
 void OrbitCamera::orbit(float dx, float dy) {
   yaw -= dx * 0.005f;
   pitch = std::clamp(pitch + dy * 0.005f, -1.55f, 1.55f);

@@ -1,6 +1,8 @@
 #include "render/splat_renderer.h"
 
 #include "core/gaussian_math.h"
+#include "core/half.h"
+#include "core/parallel.h"
 #include "core/sorting.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
@@ -55,21 +57,46 @@ void SplatRenderer::upload(const GaussianScene& scene) {
   sceneShDegree_ = scene.shDegree;
   restPerChannel_ = scene.shRestPerChannel;
 
+  const auto t0 = std::chrono::steady_clock::now();
+
   // Activations and the 3D covariance depend only on the scene, not on the camera:
-  // compute them once here instead of every frame on the GPU.
+  // compute them once here instead of every frame on the GPU. Every splat is
+  // independent, so the loop is split over all CPU cores.
   std::vector<GpuSplat> gpu(scene.size());
-  for (size_t i = 0; i < scene.size(); ++i) {
-    const Cov3 c = covarianceFromScaleRotation(glm::exp(scene.logScale[i]), scene.rotation[i]);
-    gpu[i].positionOpacity = glm::vec4(scene.position[i], sigmoid(scene.opacityLogit[i]));
-    gpu[i].cov0 = {c.xx, c.xy, c.xz, c.yy};
-    gpu[i].cov1 = {c.yz, c.zz, 0.0f, 0.0f};
-    gpu[i].dc = glm::vec4(scene.shDC[i], 0.0f);
-  }
+  parallelFor(scene.size(), [&](size_t begin, size_t end) {
+    for (size_t i = begin; i < end; ++i) {
+      const Cov3 c = covarianceFromScaleRotation(glm::exp(scene.logScale[i]), scene.rotation[i]);
+      gpu[i].positionOpacity = glm::vec4(scene.position[i], sigmoid(scene.opacityLogit[i]));
+      gpu[i].cov0 = {c.xx, c.xy, c.xz, c.yy};
+      gpu[i].cov1 = {c.yz, c.zz, 0.0f, 0.0f};
+      gpu[i].dc = glm::vec4(scene.shDC[i], 0.0f);
+    }
+  });
   splats_.allocate(gpu.size() * sizeof(GpuSplat), gpu.data(), GL_STATIC_DRAW);
-  if (!scene.shRest.empty())
+
+  // Higher SH bands: 45 floats per splat (degree 3) are the largest part of the data.
+  // Optionally store them as float16 pairs: half the memory and half the bandwidth
+  // the preprocess pass needs to read them every frame.
+  const size_t valuesPerSplat = static_cast<size_t>(restPerChannel_) * 3;
+  if (valuesPerSplat == 0) {
+    shStride_ = 0;
+    shRest_.allocate(sizeof(uint32_t), nullptr, GL_STATIC_DRAW);  // SSBOs may not be empty
+  } else if (halfSh_) {
+    shStride_ = static_cast<uint32_t>((valuesPerSplat + 1) / 2);
+    std::vector<uint32_t> packed(scene.size() * shStride_, 0u);
+    parallelFor(scene.size(), [&](size_t begin, size_t end) {
+      for (size_t i = begin; i < end; ++i) {
+        const float* src = scene.restOf(i);
+        uint32_t* dst = packed.data() + i * shStride_;
+        for (size_t v = 0; v < valuesPerSplat; ++v)  // value v goes to half (v & 1) of uint v / 2
+          dst[v / 2] |= static_cast<uint32_t>(floatToHalf(src[v])) << (16 * (v & 1));
+      }
+    });
+    shRest_.allocate(packed.size() * sizeof(uint32_t), packed.data(), GL_STATIC_DRAW);
+  } else {
+    shStride_ = static_cast<uint32_t>(valuesPerSplat);
     shRest_.allocate(scene.shRest.size() * sizeof(float), scene.shRest.data(), GL_STATIC_DRAW);
-  else
-    shRest_.allocate(sizeof(float), nullptr, GL_STATIC_DRAW);  // SSBOs may not be empty
+  }
   projected_.allocate(scene.size() * kProjectedSize);
   order_.allocate(scene.size() * sizeof(uint32_t));
   cpuOrderBuffer_.allocate(scene.size() * sizeof(uint32_t));
@@ -81,6 +108,9 @@ void SplatRenderer::upload(const GaussianScene& scene) {
   boundsRadius_ = std::max(0.5f * glm::length(scene.boundsMax - scene.boundsMin), 1e-3f);
   stats_ = {};
   stats_.total = count_;
+  stats_.uploadSceneMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  stats_.gpuMemoryBytes = splats_.size() + shRest_.size() + projected_.size() + order_.size() + sortKeys_.size() +
+                          cpuOrderBuffer_.size();
 }
 
 void SplatRenderer::preprocess(const RenderView& view, const SplatSettings& settings) {
@@ -110,6 +140,8 @@ void SplatRenderer::preprocess(const RenderView& view, const SplatSettings& sett
   preprocess_.set("uCameraPos", cameraInModel);
   preprocess_.set("uShDegree", std::min(settings.shDegree, sceneShDegree_));
   preprocess_.set("uRestPerChannel", static_cast<unsigned>(restPerChannel_));
+  preprocess_.set("uShStride", shStride_);
+  preprocess_.set("uShHalf", halfSh_ ? 1 : 0);
   preprocess_.set("uDepthRange", depthRange_);
   preprocess_.set("uKeyBits", settings.depthKeyBits == 16 ? 16 : 32);
   preprocess_.dispatch1D(count_, kPreprocessGroup);
@@ -137,6 +169,7 @@ void SplatRenderer::draw(const RenderView& view, const SplatSettings& settings) 
   draw_.set("uOrientedQuads", settings.orientedQuads ? 1 : 0);
   draw_.set("uDebugView", static_cast<int>(settings.debugView));
   draw_.set("uDepthRange", depthRange_);
+  draw_.set("uCountCoverage", settings.countCoverage ? 1 : 0);
 
   glBindVertexArray(vao_);
   if (cpuOrder) {
@@ -184,6 +217,16 @@ void SplatRenderer::render(const RenderView& view, const SplatSettings& settings
   harvestVisibleCount();
   stats_.preprocessMs = preprocessTimer_.milliseconds();
   stats_.drawMs = drawTimer_.milliseconds();
+}
+
+void SplatRenderer::resetAverages() {
+  preprocessTimer_.resetAverage();
+  sortTimer_.resetAverage();
+  drawTimer_.resetAverage();
+}
+
+SplatRenderer::Averages SplatRenderer::averages() const {
+  return {preprocessTimer_.averageMs(), sortTimer_.averageMs(), drawTimer_.averageMs()};
 }
 
 void SplatRenderer::sortOnCpu(const RenderView& view, SortMode mode) {

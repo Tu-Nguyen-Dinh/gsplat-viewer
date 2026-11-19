@@ -44,12 +44,16 @@ ProjectionParams cpuParams(const RenderView& v) {
 
 }  // namespace
 
-GPU_TEST_CASE(gpu_preprocess_matches_cpu_projection) {
+// Runs the GPU preprocess pass and compares every splat with the CPU implementation.
+// SH coefficients are uploaded as float32 or float16; the color tolerance follows:
+// float16 has a relative step of 2^-10, and up to 15 coefficients add up.
+static void checkPreprocessAgainstCpu(bool halfSh, float colorTolerance) {
   const GaussianScene scene = makeDemoScene(20000, 11);
   SplatRenderer renderer;
   std::string log;
   CHECK(renderer.init(log));
   if (!log.empty()) std::printf("%s\n", log.c_str());
+  renderer.setHalfPrecisionSh(halfSh);
   renderer.upload(scene);
 
   const RenderView view = testView(scene, 0.7f);
@@ -80,11 +84,12 @@ GPU_TEST_CASE(gpu_preprocess_matches_cpu_projection) {
     const glm::vec3 color = evalSphericalHarmonics(3, dir, scene.shDC[i], scene.restOf(i), scene.shRestPerChannel);
     maxColorError = std::max(maxColorError, glm::length(color - glm::vec3(gpu[i].color)));
   }
-  std::printf("    visible cpu %u gpu %u, boundary mismatches %u, max center err %.2e px, max conic rel err %.2e,"
-              " max SH color err %.2e\n",
-              cpuVisible, gpuVisible, mismatches, maxCenterError, maxConicError, maxColorError);
+  std::printf("    SH %s: visible cpu %u gpu %u, boundary mismatches %u, max center err %.2e px,"
+              " max conic rel err %.2e, max SH color err %.2e\n",
+              halfSh ? "fp16" : "fp32", cpuVisible, gpuVisible, mismatches, maxCenterError, maxConicError,
+              maxColorError);
   CHECK(scene.shDegree == 3);
-  CHECK(maxColorError < 1e-4f);
+  CHECK(maxColorError < colorTolerance);
   CHECK(cpuVisible > 1000);
   CHECK(cpuVisible < scene.size());  // the close-up view must cull something
   CHECK(mismatches <= scene.size() / 1000);
@@ -92,6 +97,9 @@ GPU_TEST_CASE(gpu_preprocess_matches_cpu_projection) {
   CHECK(maxCenterError < 1e-2f);
   CHECK(maxConicError < 1e-3f);
 }
+
+GPU_TEST_CASE(gpu_preprocess_matches_cpu_projection) { checkPreprocessAgainstCpu(false, 1e-4f); }
+GPU_TEST_CASE(gpu_preprocess_with_half_sh) { checkPreprocessAgainstCpu(true, 3e-3f); }
 
 GPU_TEST_CASE(gpu_viewport_culling_reduces_work) {
   // Close-up view: many splats are in front of the camera but outside the image.

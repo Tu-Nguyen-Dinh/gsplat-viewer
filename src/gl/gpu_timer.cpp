@@ -11,20 +11,24 @@ void GpuTimer::begin() {
     glGenQueries(kRing, queries_);
     created_ = true;
   }
-  const GLuint q = queries_[index_];
-  if (pending_[index_]) {
-    GLint available = 0;
-    glGetQueryObjectiv(q, GL_QUERY_RESULT_AVAILABLE, &available);
-    if (available) {
-      GLuint64 ns = 0;
-      glGetQueryObjectui64v(q, GL_QUERY_RESULT, &ns);
-      const double ms = static_cast<double>(ns) * 1e-6;
-      smoothedMs_ = smoothedMs_ == 0.0 ? ms : smoothedMs_ * 0.9 + ms * 0.1;
-    }
-    // If not available yet we simply drop that sample instead of blocking.
-    pending_[index_] = false;
+  collect(index_);
+  glBeginQuery(GL_TIME_ELAPSED, queries_[index_]);
+}
+
+void GpuTimer::collect(int slot) {
+  if (!pending_[slot]) return;
+  GLint available = 0;
+  glGetQueryObjectiv(queries_[slot], GL_QUERY_RESULT_AVAILABLE, &available);
+  if (available) {
+    GLuint64 ns = 0;
+    glGetQueryObjectui64v(queries_[slot], GL_QUERY_RESULT, &ns);
+    const double ms = static_cast<double>(ns) * 1e-6;
+    smoothedMs_ = smoothedMs_ == 0.0 ? ms : smoothedMs_ * 0.9 + ms * 0.1;
+    sumMs_ += ms;
+    ++samples_;
   }
-  glBeginQuery(GL_TIME_ELAPSED, q);
+  // If not available yet we simply drop that sample instead of blocking.
+  pending_[slot] = false;
 }
 
 void GpuTimer::end() {

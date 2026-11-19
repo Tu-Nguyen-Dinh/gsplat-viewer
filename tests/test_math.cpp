@@ -178,3 +178,64 @@ TEST_CASE(psnr_values) {
   CHECK_NEAR(psnr(a, b), 10.0 * std::log10(48.0), 1e-9);
   CHECK(maxAbsDifference(a, b) == 255);
 }
+
+#include "core/half.h"
+
+TEST_CASE(half_float_known_values) {
+  CHECK(floatToHalf(1.0f) == 0x3C00);
+  CHECK(floatToHalf(-2.0f) == 0xC000);
+  CHECK(floatToHalf(0.0f) == 0x0000);
+  CHECK(floatToHalf(65504.0f) == 0x7BFF);        // largest finite half
+  CHECK(floatToHalf(65520.0f) == 0x7C00);        // rounds up to infinity
+  CHECK(floatToHalf(0.1f) == 0x2E66);            // 0.0999755859375
+  CHECK(floatToHalf(6.103515625e-05f) == 0x0400);  // smallest normal half
+  CHECK(floatToHalf(5.9604645e-08f) == 0x0001);  // smallest subnormal half
+  CHECK(floatToHalf(1e-9f) == 0x0000);           // underflow to zero
+  CHECK(halfToFloat(0x3555) == 0.333251953125f);
+  CHECK(std::isnan(halfToFloat(floatToHalf(std::nanf("")))));
+}
+
+TEST_CASE(half_float_round_trip_error) {
+  // Every half value converts back exactly; arbitrary floats round to within half a step.
+  for (uint32_t h = 0; h < 0x7C00; ++h) CHECK(floatToHalf(halfToFloat(static_cast<uint16_t>(h))) == h);
+  float worst = 0.0f;
+  for (float v = 0.001f; v < 100.0f; v *= 1.0137f) {
+    const float r = halfToFloat(floatToHalf(v));
+    worst = std::max(worst, std::abs(r - v) / v);
+  }
+  CHECK(worst <= 1.0f / 2048.0f + 1e-7f);  // 2^-11: half of the 10-bit mantissa step
+}
+
+#include "core/parallel.h"
+
+#include <chrono>
+#include <random>
+#include <vector>
+
+TEST_CASE(parallel_for_matches_serial_and_is_faster) {
+  // The same per-splat precompute as SplatRenderer::upload, serial vs parallelFor.
+  const size_t n = 1000000;
+  std::mt19937 rng(5);
+  std::uniform_real_distribution<float> u(-1.0f, 1.0f);
+  std::vector<glm::vec3> scale(n);
+  std::vector<glm::vec4> rot(n);
+  for (size_t i = 0; i < n; ++i) {
+    scale[i] = glm::vec3(u(rng), u(rng), u(rng));
+    rot[i] = glm::vec4(u(rng), u(rng), u(rng), u(rng));
+  }
+  std::vector<Cov3> serial(n), parallel(n);
+  const auto t0 = std::chrono::steady_clock::now();
+  for (size_t i = 0; i < n; ++i) serial[i] = covarianceFromScaleRotation(glm::exp(scale[i]), rot[i]);
+  const auto t1 = std::chrono::steady_clock::now();
+  parallelFor(n, [&](size_t b, size_t e) {
+    for (size_t i = b; i < e; ++i) parallel[i] = covarianceFromScaleRotation(glm::exp(scale[i]), rot[i]);
+  });
+  const auto t2 = std::chrono::steady_clock::now();
+  const double ms1 = std::chrono::duration<double, std::milli>(t1 - t0).count();
+  const double ms2 = std::chrono::duration<double, std::milli>(t2 - t1).count();
+  std::printf("    1M covariances: serial %.1f ms, parallelFor %.1f ms (%.1fx, %u threads)\n", ms1, ms2, ms1 / ms2,
+              std::thread::hardware_concurrency());
+  bool same = true;
+  for (size_t i = 0; i < n && same; ++i) same = serial[i].xx == parallel[i].xx && serial[i].yz == parallel[i].yz;
+  CHECK(same);  // bit-identical: each element is computed by exactly the same code
+}

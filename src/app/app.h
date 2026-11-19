@@ -37,7 +37,8 @@ class App {
   glm::mat4 modelMatrix() const;
 
   void handleInput(float dt, int fbHeight);
-  void drawUi();  // ui.cpp
+  void drawUi();                             // ui.cpp
+  int runBenchmark(const Options& options);  // benchmark.cpp
 
   static void onDrop(GLFWwindow* window, int count, const char** paths);
   static void onScroll(GLFWwindow* window, double dx, double dy);
@@ -60,6 +61,8 @@ class App {
   glm::vec3 background_{0.07f, 0.08f, 0.1f};
 
   float distanceScale_ = 1.0f;  // multiplier on the framing distance (--distance)
+  bool fixedCamera_ = false;    // --camera-pos / --camera-target
+  glm::vec3 fixedEye_{0.0f}, fixedTarget_{0.0f};
 
   // Background loading.
   std::future<LoadResult> loading_;

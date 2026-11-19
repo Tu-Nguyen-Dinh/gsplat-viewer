@@ -1,5 +1,6 @@
 #include "app/options.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 
@@ -20,7 +21,13 @@ void printUsage() {
       "  --sh 0..3            spherical harmonics degree\n"
       "  --sort MODE          none | cpu-std | cpu-radix | gpu (default)\n"
       "  --view MODE          color | depth | overdraw | ellipses\n"
-      "  --distance SCALE     camera distance relative to the default framing\n");
+      "  --distance SCALE     camera distance relative to the default framing\n"
+      "  --camera-pos X,Y,Z   exact camera position (with --camera-target)\n"
+      "  --camera-target X,Y,Z\n"
+      "  --background R,G,B   clear color in [0,1]\n"
+      "  --bench              benchmark several configurations (orbit), print a table, exit\n"
+      "  --frames N           measured frames per configuration (default 240)\n"
+      "  --csv FILE           append benchmark results to a CSV file\n");
 }
 }  // namespace
 
@@ -72,6 +79,21 @@ bool parseOptions(int argc, char** argv, Options& o) {
       const char* v = next();
       if (!v) return printUsage(), false;
       o.distanceScale = std::strtof(v, nullptr);
+    } else if (a == "--camera-pos" || a == "--camera-target" || a == "--background") {
+      const char* v = next();
+      float* dst = a == "--camera-pos" ? o.cameraPos : a == "--camera-target" ? o.cameraTarget : o.background;
+      if (!v || std::sscanf(v, "%f,%f,%f", &dst[0], &dst[1], &dst[2]) != 3) return printUsage(), false;
+      if (a != "--background") o.hasCamera = true;
+    } else if (a == "--bench") {
+      o.benchmark = true;
+    } else if (a == "--frames") {
+      const char* v = next();
+      if (!v) return printUsage(), false;
+      o.benchFrames = std::max(1, std::atoi(v));
+    } else if (a == "--csv") {
+      const char* v = next();
+      if (!v) return printUsage(), false;
+      o.benchCsv = v;
     } else if (a == "--help" || a == "-h") {
       printUsage();
       return false;

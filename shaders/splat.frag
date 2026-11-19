@@ -9,6 +9,7 @@ flat in vec4 vColorDepth;
 
 uniform int uDebugView;      // 0 = color, 1 = depth, 2 = overdraw, 3 = ellipse outlines
 uniform vec2 uDepthRange;    // (min, 1 / (max - min)) for the depth view
+uniform int uCountCoverage;  // benchmark: keep every rasterized fragment so a query can count them
 
 out vec4 fragColor;
 
@@ -19,6 +20,10 @@ vec3 heat(float t) {
 }
 
 void main() {
+    if (uCountCoverage != 0) {        // counted by a GL_SAMPLES_PASSED query, contributes nothing
+        fragColor = vec4(0.0);
+        return;
+    }
     vec3 c = vConicOpacity.xyz;
     vec2 d = vOffset;
     float power = -0.5 * (c.x * d.x * d.x + 2.0 * c.y * d.x * d.y + c.z * d.y * d.y);
