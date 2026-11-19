@@ -61,7 +61,7 @@ GPU_TEST_CASE(gpu_preprocess_matches_cpu_projection) {
 
   const ProjectionParams params = cpuParams(view);
   uint32_t cpuVisible = 0, mismatches = 0;
-  float maxCenterError = 0.0f, maxConicError = 0.0f;
+  float maxCenterError = 0.0f, maxConicError = 0.0f, maxColorError = 0.0f;
   for (size_t i = 0; i < scene.size(); ++i) {
     const Cov3 cov = covarianceFromScaleRotation(glm::exp(scene.logScale[i]), scene.rotation[i]);
     const ProjectedGaussian c = projectGaussian(scene.position[i], cov, params);
@@ -75,9 +75,16 @@ GPU_TEST_CASE(gpu_preprocess_matches_cpu_projection) {
     maxCenterError = std::max(maxCenterError, glm::length(c.center - glm::vec2(gpu[i].centerDepthRadius)));
     const glm::vec3 gc(gpu[i].conicOpacity);
     maxConicError = std::max(maxConicError, glm::length(c.conic - gc) / glm::length(c.conic));
+    // View-dependent color (spherical harmonics, degree 3).
+    const glm::vec3 dir = glm::normalize(scene.position[i] - view.cameraPosition);
+    const glm::vec3 color = evalSphericalHarmonics(3, dir, scene.shDC[i], scene.restOf(i), scene.shRestPerChannel);
+    maxColorError = std::max(maxColorError, glm::length(color - glm::vec3(gpu[i].color)));
   }
-  std::printf("    visible cpu %u gpu %u, boundary mismatches %u, max center err %.2e px, max conic rel err %.2e\n",
-              cpuVisible, gpuVisible, mismatches, maxCenterError, maxConicError);
+  std::printf("    visible cpu %u gpu %u, boundary mismatches %u, max center err %.2e px, max conic rel err %.2e,"
+              " max SH color err %.2e\n",
+              cpuVisible, gpuVisible, mismatches, maxCenterError, maxConicError, maxColorError);
+  CHECK(scene.shDegree == 3);
+  CHECK(maxColorError < 1e-4f);
   CHECK(cpuVisible > 1000);
   CHECK(cpuVisible < scene.size());  // the close-up view must cull something
   CHECK(mismatches <= scene.size() / 1000);

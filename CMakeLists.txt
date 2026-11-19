@@ -68,7 +68,8 @@ add_library(gsplat_core STATIC
   src/scene/demo_scene.cpp
   src/render/point_renderer.cpp
   src/render/splat_renderer.cpp
-  src/render/reference_renderer.cpp)
+  src/render/reference_renderer.cpp
+  src/render/gpu_radix_sort.cpp)
 
 # third_party/: Khronos GL headers and stb_image_write.h (single-file, vendored).
 target_include_directories(gsplat_core PUBLIC src third_party/khronos PRIVATE third_party/stb)
@@ -109,7 +110,8 @@ if(GSV_BUILD_TESTS)
     tests/test_scene_io.cpp
     tests/test_sorting.cpp
     tests/test_gpu_projection.cpp
-    tests/test_gpu_render.cpp)
+    tests/test_gpu_render.cpp
+    tests/test_gpu_sort.cpp)
   target_link_libraries(gsplat_tests PRIVATE gsplat_core)
   target_include_directories(gsplat_tests PRIVATE tests)
   gsv_warnings(gsplat_tests)

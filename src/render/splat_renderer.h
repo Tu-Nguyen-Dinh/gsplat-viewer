@@ -4,6 +4,7 @@
 #include "gl/buffer.h"
 #include "gl/gpu_timer.h"
 #include "gl/shader.h"
+#include "render/gpu_radix_sort.h"
 #include "render/render_view.h"
 #include "scene/gaussian_scene.h"
 
@@ -21,6 +22,7 @@ enum class SortMode : int {
   None = 0,      // GPU visible-list order (random): wrong image, shows why sorting matters
   CpuStd = 1,    // std::sort on the CPU, upload the order every time the camera moves
   CpuRadix = 2,  // LSD radix sort on the CPU
+  GpuRadix = 3,  // radix sort in compute shaders: no CPU work, no upload
 };
 
 struct SplatSettings {
@@ -28,7 +30,8 @@ struct SplatSettings {
   float splatScale = 1.0f;
   bool orientedQuads = true;     // quad aligned with the ellipse axes (fewer wasted fragments)
   bool cullOutsideViewport = true;
-  SortMode sort = SortMode::CpuRadix;
+  SortMode sort = SortMode::GpuRadix;
+  int depthKeyBits = 32;         // 32: exact float depth (8 passes); 16: quantized depth (4 passes)
   DebugView debugView = DebugView::Color;
 };
 
@@ -36,6 +39,7 @@ struct SplatStats {
   uint32_t total = 0;
   uint32_t visible = 0;          // read back asynchronously, a few frames old
   double preprocessMs = 0.0;     // GPU times
+  double gpuSortMs = 0.0;
   double drawMs = 0.0;
   double cpuSortMs = 0.0;        // CPU time of the last sort (depth keys + sort)
   double uploadMs = 0.0;         // CPU time to upload the sorted order
@@ -44,7 +48,7 @@ struct SplatStats {
 
 // GPU pipeline for 3D Gaussian Splatting:
 //   1. preprocess (compute): project + color + cull every Gaussian, append visible ones
-//   2. sort back-to-front (CPU on Day 3; GPU radix sort on Day 4)
+//   2. sort back-to-front (GPU radix sort, or CPU std::sort / radix for comparison)
 //   3. draw: one instanced quad per visible splat, alpha blended
 class SplatRenderer {
  public:
@@ -79,6 +83,8 @@ class SplatRenderer {
 
   ShaderProgram preprocess_;
   ShaderProgram draw_;
+  GpuRadixSort gpuSort_;
+  GpuTimer sortTimer_;
   GLuint vao_ = 0;
 
   GlBuffer splats_;       // GpuSplat[count]

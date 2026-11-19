@@ -4,6 +4,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/quaternion.hpp>
 
+#include <array>
 #include <random>
 
 namespace gsv {
@@ -25,19 +26,35 @@ glm::vec3 hsv(float h, float s, float v) {
 
 }  // namespace
 
-GaussianScene makeDemoScene(size_t count, uint32_t seed) {
+GaussianScene makeDemoScene(size_t count, uint32_t seed, bool viewDependent) {
   std::mt19937 rng(seed);
   std::uniform_real_distribution<float> u01(0.0f, 1.0f);
   const float twoPi = glm::two_pi<float>();
 
   GaussianScene s;
   s.position.reserve(count);
+  if (viewDependent) {
+    s.shDegree = 3;
+    s.shRestPerChannel = 15;
+    s.shRest.reserve(count * 45);
+  }
+  // rest[c * 15 + (k - 1)] = coefficient k of channel c (PLY channel-major layout).
+  std::array<float, 45> rest{};
   auto push = [&](glm::vec3 p, glm::vec3 n, glm::vec3 color, float size, float opacity) {
     s.position.push_back(p);
     s.logScale.push_back(glm::log(glm::vec3(size, size * (0.6f + 0.4f * u01(rng)), size * 0.15f)));
     s.rotation.push_back(orientToNormal(n, u01(rng) * twoPi));
     s.opacityLogit.push_back(logit(opacity));
     s.shDC.push_back((color - 0.5f) / kShC0);
+    if (viewDependent) s.shRest.insert(s.shRest.end(), rest.begin(), rest.end());
+    rest.fill(0.0f);
+  };
+  // Band 1 can represent any linear function of the view direction d:
+  //   SH1(d) = C1 * (-s3 * x - s1 * y + s2 * z)  ==  dot(d, v)  when  s1 = -v.y/C1, s2 = v.z/C1, s3 = -v.x/C1.
+  auto setLinear = [&](int channel, glm::vec3 v) {
+    rest[channel * 15 + 0] = -v.y / kShC1;
+    rest[channel * 15 + 1] = v.z / kShC1;
+    rest[channel * 15 + 2] = -v.x / kShC1;
   };
 
   const size_t nSphere = count * 4 / 10, nTorus = count * 3 / 10, nFloor = count - nSphere - nTorus;
@@ -47,7 +64,10 @@ GaussianScene makeDemoScene(size_t count, uint32_t seed) {
   for (size_t i = 0; i < nSphere; ++i) {
     float z = u01(rng) * 2.0f - 1.0f, a = u01(rng) * twoPi, r = std::sqrt(1.0f - z * z);
     glm::vec3 n(r * std::cos(a), z, r * std::sin(a));
-    push(sc + n * 0.9f, n, hsv(a / twoPi, 0.65f, 0.95f), 0.025f, 0.9f);
+    // "Headlight": brighter where the surface faces the camera. d points from the camera
+    // to the splat, so facing the camera means dot(d, n) = -1: use f(d) = dot(d, -0.3 n).
+    for (int c = 0; c < 3; ++c) setLinear(c, -0.3f * n);
+    push(sc + n * 0.9f, n, hsv(a / twoPi, 0.65f, 0.8f), 0.025f, 0.9f);
   }
   // Torus.
   const glm::vec3 tc(1.3f, 0.9f, 0.0f);
@@ -57,6 +77,12 @@ GaussianScene makeDemoScene(size_t count, uint32_t seed) {
     glm::vec3 n = ring * std::cos(b) + glm::vec3(0, std::sin(b), 0);
     glm::vec3 p = tc + ring * 0.7f + n * 0.25f;
     float g = 0.5f + 0.5f * std::cos(b);
+    // "Iridescence": each channel follows a different band-2 basis function (xy, yz, xz),
+    // plus a little band 3, so the hue shifts as the camera orbits.
+    rest[0 * 15 + 3] = 0.9f;   // R, coefficient 4 (xy)
+    rest[1 * 15 + 4] = 0.9f;   // G, coefficient 5 (yz)
+    rest[2 * 15 + 6] = 0.9f;   // B, coefficient 7 (xz)
+    for (int c = 0; c < 3; ++c) rest[c * 15 + 8] = 0.3f;  // coefficient 9 (band 3)
     push(p, n, glm::mix(glm::vec3(0.85f, 0.55f, 0.15f), glm::vec3(1.0f, 0.9f, 0.6f), g), 0.02f, 0.95f);
   }
   // Checkered floor disc.

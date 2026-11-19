@@ -94,6 +94,9 @@ void App::shutdown() {
 int App::run(const Options& o) {
   flipY_ = o.flipY;
   mode_ = o.points ? RenderMode::Points : RenderMode::Splats;
+  splatSettings_.shDegree = o.shDegree;
+  splatSettings_.sort = static_cast<SortMode>(o.sortMode);
+  if (o.yaw > -999.0f) camera_.yaw = o.yaw;
   if (!createWindow(o)) {
     if (window_) shutdown();
     return 1;
@@ -151,10 +154,10 @@ int App::run(const Options& o) {
       std::string error;
       if (savePng(pathFromUtf8(o.screenshot), readFramebuffer(0, fbW, fbH), error)) {
         const SplatStats& s = splats_.stats();
-        std::printf("Saved %s (%dx%d) | %zu splats | %u visible | preprocess %.3f ms | cpu sort %.2f ms"
-                    " | upload %.2f ms | draw %.3f ms\n",
-                    o.screenshot.c_str(), fbW, fbH, scene_.size(), s.visible, s.preprocessMs, s.cpuSortMs,
-                    s.uploadMs, s.drawMs);
+        std::printf("Saved %s (%dx%d) | %zu splats | %u visible | preprocess %.3f ms | gpu sort %.3f ms"
+                    " | cpu sort %.2f ms | draw %.3f ms\n",
+                    o.screenshot.c_str(), fbW, fbH, scene_.size(), s.visible, s.preprocessMs, s.gpuSortMs,
+                    s.cpuSortMs, s.drawMs);
       } else {
         std::fprintf(stderr, "Screenshot failed: %s\n", error.c_str());
         exitCode = 1;

@@ -38,7 +38,9 @@ void App::drawUi() {
     ImGui::Text("Visible    %u / %u (%.0f%%)", s.visible, s.total, s.total ? 100.0 * s.visible / s.total : 0.0);
     ImGui::Text("GPU preprocess %.3f ms", s.preprocessMs);
     ImGui::Text("GPU draw       %.3f ms", s.drawMs);
-    if (splatSettings_.sort != SortMode::None)
+    if (splatSettings_.sort == SortMode::GpuRadix)
+      ImGui::Text("GPU sort       %.3f ms", s.gpuSortMs);
+    else if (splatSettings_.sort != SortMode::None)
       ImGui::Text("CPU sort       %.3f ms + upload %.3f ms%s", s.cpuSortMs, s.uploadMs,
                   s.sortSkipped ? "  (cached)" : "");
   } else {
@@ -59,8 +61,13 @@ void App::drawUi() {
     ImGui::Combo("View", &view, "Color\0Depth\0Overdraw\0Ellipses\0");
     splatSettings_.debugView = static_cast<DebugView>(view);
     int sort = static_cast<int>(splatSettings_.sort);
-    ImGui::Combo("Sort", &sort, "None (wrong order)\0CPU std::sort\0CPU radix sort\0");
+    ImGui::Combo("Sort", &sort, "None (wrong order)\0CPU std::sort\0CPU radix sort\0GPU radix sort\0");
     splatSettings_.sort = static_cast<SortMode>(sort);
+    if (splatSettings_.sort == SortMode::GpuRadix) {
+      bool key16 = splatSettings_.depthKeyBits == 16;
+      if (ImGui::Checkbox("16-bit depth keys (4 passes instead of 8)", &key16))
+        splatSettings_.depthKeyBits = key16 ? 16 : 32;
+    }
     ImGui::SliderInt("SH degree", &splatSettings_.shDegree, 0, 3);
     ImGui::SliderFloat("Splat scale", &splatSettings_.splatScale, 0.1f, 2.0f);
     ImGui::Checkbox("Oriented quads", &splatSettings_.orientedQuads);

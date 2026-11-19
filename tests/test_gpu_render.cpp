@@ -89,6 +89,27 @@ GPU_TEST_CASE(gpu_render_matches_cpu_reference) {
   }
 }
 
+GPU_TEST_CASE(gpu_sorted_on_gpu_matches_reference) {
+  const GaussianScene scene = makeDemoScene(30000, 8);
+  SplatRenderer renderer;
+  std::string log;
+  CHECK(renderer.init(log));
+  renderer.upload(scene);
+  const RenderView view = makeView(scene, 4.0f, 0.9f);
+  SplatSettings s;
+  s.sort = SortMode::GpuRadix;
+  const Image ref = renderReference(scene, view, referenceFor(s));
+  const double p32 = psnr(ref, renderGpu(renderer, view, s, Framebuffer::Format::RGBA16F));
+  s.depthKeyBits = 16;
+  const double p16 = psnr(ref, renderGpu(renderer, view, s, Framebuffer::Format::RGBA16F));
+  s.shDegree = 0;  // without view-dependent color the image must differ (SH is really used)
+  const double pNoSh = psnr(ref, renderGpu(renderer, view, s, Framebuffer::Format::RGBA16F));
+  std::printf("    GPU sort: 32-bit keys %.2f dB, 16-bit keys %.2f dB, SH degree 0 %.2f dB\n", p32, p16, pNoSh);
+  CHECK(p32 > 40.0);
+  CHECK(p16 > 35.0);
+  CHECK(pNoSh < 35.0);
+}
+
 GPU_TEST_CASE(gpu_square_quads_match_reference) {
   const GaussianScene scene = makeDemoScene(10000, 4);
   SplatRenderer renderer;

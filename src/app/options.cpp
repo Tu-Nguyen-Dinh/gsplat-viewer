@@ -15,7 +15,10 @@ void printUsage() {
       "  --flip-y             scene is stored Y-down (INRIA / COLMAP)\n"
       "  --size WxH           window / image size (default 1600x900)\n"
       "  --screenshot F.png   render without UI, save the image and exit\n"
-      "  --points             start in point mode\n");
+      "  --points             start in point mode\n"
+      "  --yaw RADIANS        camera yaw around the scene\n"
+      "  --sh 0..3            spherical harmonics degree\n"
+      "  --sort MODE          none | cpu-std | cpu-radix | gpu (default)\n");
 }
 }  // namespace
 
@@ -39,6 +42,22 @@ bool parseOptions(int argc, char** argv, Options& o) {
       if (!v) return printUsage(), false;
       o.generateTo = v;
       if (i + 1 < argc && argv[i + 1][0] != '-') o.generateCount = std::strtoull(argv[++i], nullptr, 10);
+    } else if (a == "--yaw") {
+      const char* v = next();
+      if (!v) return printUsage(), false;
+      o.yaw = std::strtof(v, nullptr);
+    } else if (a == "--sh") {
+      const char* v = next();
+      if (!v) return printUsage(), false;
+      o.shDegree = std::atoi(v);
+    } else if (a == "--sort") {
+      const char* v = next();
+      const std::string m = v ? v : "";
+      if (m == "none") o.sortMode = 0;
+      else if (m == "cpu-std") o.sortMode = 1;
+      else if (m == "cpu-radix") o.sortMode = 2;
+      else if (m == "gpu") o.sortMode = 3;
+      else return printUsage(), false;
     } else if (a == "--help" || a == "-h") {
       printUsage();
       return false;

@@ -1,0 +1,75 @@
+#version 430 core
+// Radix sort, step 3: move every key/value pair of the block to its sorted position.
+//
+// destination = blockOffset[digit]          (scanned histogram: keys of smaller digits,
+//                                            plus same digit in earlier blocks)
+//             + runCount[digit]             (same digit in earlier rounds of this block)
+//             + rank                        (same digit in earlier threads of this round)
+// Every term preserves the input order, so the sort is STABLE (required by LSD radix sort).
+#include "include/radix_common.glsl"
+
+layout(local_size_x = 256) in;
+layout(std430, binding = 0) readonly buffer KeysIn    { uint keysIn[]; };
+layout(std430, binding = 1) readonly buffer ValuesIn  { uint valuesIn[]; };
+layout(std430, binding = 2) writeonly buffer KeysOut  { uint keysOut[]; };
+layout(std430, binding = 3) writeonly buffer ValuesOut{ uint valuesOut[]; };
+layout(std430, binding = 4) readonly buffer BlockHist { uint blockOffset[]; };  // scanned
+
+// Per-digit flags of the 256 threads, two 16-bit counters packed per uint:
+// row r holds digit 2r in the low half and digit 2r+1 in the high half.
+shared uint sScan[RADIX_BUCKETS / 2u][RADIX_THREADS];
+shared uint sBase[RADIX_BUCKETS];
+shared uint sRun[RADIX_BUCKETS];
+
+void main() {
+    uint t = gl_LocalInvocationID.x;
+    uint block = gl_WorkGroupID.x;
+    uint n = elementCount();
+    if (t < RADIX_BUCKETS) {
+        sBase[t] = blockOffset[t * uNumBlocks + block];
+        sRun[t] = 0u;
+    }
+
+    for (uint r = 0u; r < RADIX_ROUNDS; ++r) {
+        uint i = block * RADIX_BLOCK + r * RADIX_THREADS + t;
+        bool valid = i < n;
+        uint key = valid ? keysIn[i] : 0u;
+        uint digit = valid ? digitOf(key) : RADIX_BUCKETS;   // invalid: counted nowhere
+
+        // 1. One-hot flag of this thread's digit in its packed row.
+        for (uint row = 0u; row < RADIX_BUCKETS / 2u; ++row) {
+            uint v = 0u;
+            if (digit == 2u * row) v = 1u;
+            else if (digit == 2u * row + 1u) v = 1u << 16;
+            sScan[row][t] = v;
+        }
+        barrier();
+
+        // 2. Inclusive Hillis-Steele scan of every row over the 256 threads.
+        for (uint offset = 1u; offset < RADIX_THREADS; offset <<= 1u) {
+            uint add[RADIX_BUCKETS / 2u];
+            for (uint row = 0u; row < RADIX_BUCKETS / 2u; ++row)
+                add[row] = t >= offset ? sScan[row][t - offset] : 0u;
+            barrier();
+            for (uint row = 0u; row < RADIX_BUCKETS / 2u; ++row) sScan[row][t] += add[row];
+            barrier();
+        }
+
+        // 3. Scatter to the sorted position.
+        if (valid) {
+            uint counts = sScan[digit >> 1u][t];   // note: "packed" is a reserved word in GLSL
+            uint rank = ((counts >> ((digit & 1u) * 16u)) & 0xFFFFu) - 1u;   // inclusive -> 0-based
+            uint dst = sBase[digit] + sRun[digit] + rank;
+            keysOut[dst] = key;
+            valuesOut[dst] = valuesIn[i];
+        }
+        barrier();
+
+        // 4. Advance the running count of each digit by this round's total (last thread's sums).
+        if (t < RADIX_BUCKETS) {
+            uint total = sScan[t >> 1u][RADIX_THREADS - 1u];
+            sRun[t] += (total >> ((t & 1u) * 16u)) & 0xFFFFu;
+        }
+        barrier();
+    }
+}

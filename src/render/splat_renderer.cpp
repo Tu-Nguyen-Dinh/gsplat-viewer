@@ -35,6 +35,7 @@ constexpr unsigned kPreprocessGroup = 256;
 bool SplatRenderer::init(std::string& log) {
   if (!preprocess_.loadCompute("splat_preprocess.comp", log)) return false;
   if (!draw_.loadGraphics("splat.vert", "splat.frag", log)) return false;
+  if (!gpuSort_.init(log)) return false;
   glGenVertexArrays(1, &vao_);  // no vertex attributes: everything comes from SSBOs
   const DrawCommand cmd{4, 0, 0, 0};
   drawCommand_.allocate(sizeof(cmd), &cmd);
@@ -43,10 +44,10 @@ bool SplatRenderer::init(std::string& log) {
 }
 
 bool SplatRenderer::reloadShaders(std::string& log) {
-  std::string l1, l2;
-  const bool ok1 = preprocess_.reload(l1), ok2 = draw_.reload(l2);
-  log = l1 + l2;
-  return ok1 && ok2;
+  std::string l1, l2, l3;
+  const bool ok1 = preprocess_.reload(l1), ok2 = draw_.reload(l2), ok3 = gpuSort_.reloadShaders(l3);
+  log = l1 + l2 + l3;
+  return ok1 && ok2 && ok3;
 }
 
 void SplatRenderer::upload(const GaussianScene& scene) {
@@ -110,7 +111,7 @@ void SplatRenderer::preprocess(const RenderView& view, const SplatSettings& sett
   preprocess_.set("uShDegree", std::min(settings.shDegree, sceneShDegree_));
   preprocess_.set("uRestPerChannel", static_cast<unsigned>(restPerChannel_));
   preprocess_.set("uDepthRange", depthRange_);
-  preprocess_.set("uKeyBits", 32);
+  preprocess_.set("uKeyBits", settings.depthKeyBits == 16 ? 16 : 32);
   preprocess_.dispatch1D(count_, kPreprocessGroup);
 
   // The draw reads the SSBOs in the vertex shader and the counter as indirect arguments.
@@ -165,7 +166,16 @@ void SplatRenderer::render(const RenderView& view, const SplatSettings& settings
   preprocess(view, settings);
   preprocessTimer_.end();
 
-  if (settings.sort == SortMode::CpuStd || settings.sort == SortMode::CpuRadix) sortOnCpu(view, settings.sort);
+  if (settings.sort == SortMode::CpuStd || settings.sort == SortMode::CpuRadix) {
+    sortOnCpu(view, settings.sort);
+  } else if (settings.sort == SortMode::GpuRadix) {
+    // Sorts the visible list in place: keys = depth keys, values = splat indices.
+    // The count is the instanceCount field (uint #1) of the indirect draw command.
+    sortTimer_.begin();
+    gpuSort_.sort(sortKeys_, order_, drawCommand_, 1, count_, settings.depthKeyBits == 16 ? 16 : 32);
+    sortTimer_.end();
+    stats_.gpuSortMs = sortTimer_.milliseconds();
+  }
 
   drawTimer_.begin();
   draw(view, settings);
