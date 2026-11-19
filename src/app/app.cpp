@@ -150,9 +150,11 @@ int App::run(const Options& o) {
     if (screenshotMode && ++frameIndex == 8) {
       std::string error;
       if (savePng(pathFromUtf8(o.screenshot), readFramebuffer(0, fbW, fbH), error)) {
-        std::printf("Saved %s (%dx%d) | %zu splats | %u visible | preprocess %.3f ms | draw %.3f ms\n",
-                    o.screenshot.c_str(), fbW, fbH, scene_.size(), splats_.stats().visible,
-                    splats_.stats().preprocessMs, splats_.stats().drawMs);
+        const SplatStats& s = splats_.stats();
+        std::printf("Saved %s (%dx%d) | %zu splats | %u visible | preprocess %.3f ms | cpu sort %.2f ms"
+                    " | upload %.2f ms | draw %.3f ms\n",
+                    o.screenshot.c_str(), fbW, fbH, scene_.size(), s.visible, s.preprocessMs, s.cpuSortMs,
+                    s.uploadMs, s.drawMs);
       } else {
         std::fprintf(stderr, "Screenshot failed: %s\n", error.c_str());
         exitCode = 1;

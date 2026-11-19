@@ -15,6 +15,10 @@ flat out vec4 vColorDepth;           // rgb = color, a = depth (debug views)
 
 void main() {
     ProjectedSplat s = projected[order[gl_InstanceID]];
+    if (s.centerDepthRadius.w <= 0.0) {          // culled (only happens with CPU ordering)
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);  // outside the clip volume: no fragments
+        return;
+    }
 
     // gl_VertexID 0..3 -> (-1,-1) (1,-1) (-1,1) (1,1)
     vec2 corner = vec2(gl_VertexID & 1, (gl_VertexID >> 1) & 1) * 2.0 - 1.0;

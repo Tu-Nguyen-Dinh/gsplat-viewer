@@ -1,10 +1,12 @@
 #include "render/splat_renderer.h"
 
 #include "core/gaussian_math.h"
+#include "core/sorting.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <vector>
 
 namespace gsv {
@@ -69,6 +71,9 @@ void SplatRenderer::upload(const GaussianScene& scene) {
     shRest_.allocate(sizeof(float), nullptr, GL_STATIC_DRAW);  // SSBOs may not be empty
   projected_.allocate(scene.size() * kProjectedSize);
   order_.allocate(scene.size() * sizeof(uint32_t));
+  cpuOrderBuffer_.allocate(scene.size() * sizeof(uint32_t));
+  positions_ = scene.position;  // CPU copy for depth sorting
+  cpuOrderValid_ = false;
   sortKeys_.allocate(scene.size() * sizeof(uint32_t));
 
   boundsCenter_ = 0.5f * (scene.boundsMin + scene.boundsMax);
@@ -121,8 +126,11 @@ void SplatRenderer::draw(const RenderView& view, const SplatSettings& settings) 
   else
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);  // premultiplied "over", back to front
 
+  // CPU sorting orders ALL splats (culled ones are skipped in the vertex shader);
+  // otherwise the GPU-built visible list is drawn with an indirect call.
+  const bool cpuOrder = settings.sort == SortMode::CpuStd || settings.sort == SortMode::CpuRadix;
   projected_.bindBase(GL_SHADER_STORAGE_BUFFER, kBindProjected);
-  order_.bindBase(GL_SHADER_STORAGE_BUFFER, kBindOrder);
+  (cpuOrder ? cpuOrderBuffer_ : order_).bindBase(GL_SHADER_STORAGE_BUFFER, kBindOrder);
   draw_.use();
   draw_.set("uViewport", glm::vec2(view.viewport));
   draw_.set("uOrientedQuads", settings.orientedQuads ? 1 : 0);
@@ -130,9 +138,13 @@ void SplatRenderer::draw(const RenderView& view, const SplatSettings& settings) 
   draw_.set("uDepthRange", depthRange_);
 
   glBindVertexArray(vao_);
-  drawCommand_.bind(GL_DRAW_INDIRECT_BUFFER);
-  glDrawArraysIndirect(GL_TRIANGLE_STRIP, nullptr);
-  glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+  if (cpuOrder) {
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, static_cast<GLsizei>(count_));
+  } else {
+    drawCommand_.bind(GL_DRAW_INDIRECT_BUFFER);
+    glDrawArraysIndirect(GL_TRIANGLE_STRIP, nullptr);
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+  }
   glBindVertexArray(0);
 
   glDisable(GL_BLEND);
@@ -153,6 +165,8 @@ void SplatRenderer::render(const RenderView& view, const SplatSettings& settings
   preprocess(view, settings);
   preprocessTimer_.end();
 
+  if (settings.sort == SortMode::CpuStd || settings.sort == SortMode::CpuRadix) sortOnCpu(view, settings.sort);
+
   drawTimer_.begin();
   draw(view, settings);
   drawTimer_.end();
@@ -160,6 +174,31 @@ void SplatRenderer::render(const RenderView& view, const SplatSettings& settings
   harvestVisibleCount();
   stats_.preprocessMs = preprocessTimer_.milliseconds();
   stats_.drawMs = drawTimer_.milliseconds();
+}
+
+void SplatRenderer::sortOnCpu(const RenderView& view, SortMode mode) {
+  // The order only depends on the camera: skip the sort while it does not move.
+  const glm::mat4 modelView = view.view * view.model;
+  if (cpuOrderValid_ && mode == lastCpuSortMode_ && modelView == lastSortedModelView_) {
+    stats_.sortSkipped = true;
+    return;
+  }
+  const auto t0 = std::chrono::steady_clock::now();
+  computeDepthKeys(positions_, modelView, cpuKeys_);
+  if (mode == SortMode::CpuStd)
+    sortByKeyStd(cpuKeys_, cpuOrder_);
+  else
+    sortByKeyRadix(cpuKeys_, cpuOrder_, radixScratch_);
+  const auto t1 = std::chrono::steady_clock::now();
+  cpuOrderBuffer_.upload(0, cpuOrder_.size() * sizeof(uint32_t), cpuOrder_.data());
+  const auto t2 = std::chrono::steady_clock::now();
+
+  stats_.cpuSortMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+  stats_.uploadMs = std::chrono::duration<double, std::milli>(t2 - t1).count();
+  stats_.sortSkipped = false;
+  lastSortedModelView_ = modelView;
+  lastCpuSortMode_ = mode;
+  cpuOrderValid_ = true;
 }
 
 void SplatRenderer::harvestVisibleCount() {

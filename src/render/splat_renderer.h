@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/sorting.h"
 #include "gl/buffer.h"
 #include "gl/gpu_timer.h"
 #include "gl/shader.h"
@@ -9,16 +10,25 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace gsv {
 
 enum class DebugView : int { Color = 0, Depth = 1, Overdraw = 2, Ellipses = 3 };
+
+// How splats are ordered back-to-front before blending.
+enum class SortMode : int {
+  None = 0,      // GPU visible-list order (random): wrong image, shows why sorting matters
+  CpuStd = 1,    // std::sort on the CPU, upload the order every time the camera moves
+  CpuRadix = 2,  // LSD radix sort on the CPU
+};
 
 struct SplatSettings {
   int shDegree = 3;              // clamped to what the scene has
   float splatScale = 1.0f;
   bool orientedQuads = true;     // quad aligned with the ellipse axes (fewer wasted fragments)
   bool cullOutsideViewport = true;
+  SortMode sort = SortMode::CpuRadix;
   DebugView debugView = DebugView::Color;
 };
 
@@ -27,11 +37,14 @@ struct SplatStats {
   uint32_t visible = 0;          // read back asynchronously, a few frames old
   double preprocessMs = 0.0;     // GPU times
   double drawMs = 0.0;
+  double cpuSortMs = 0.0;        // CPU time of the last sort (depth keys + sort)
+  double uploadMs = 0.0;         // CPU time to upload the sorted order
+  bool sortSkipped = false;      // camera did not move: previous order reused
 };
 
 // GPU pipeline for 3D Gaussian Splatting:
 //   1. preprocess (compute): project + color + cull every Gaussian, append visible ones
-//   2. (sorting is added on Day 3/4)
+//   2. sort back-to-front (CPU on Day 3; GPU radix sort on Day 4)
 //   3. draw: one instanced quad per visible splat, alpha blended
 class SplatRenderer {
  public:
@@ -52,7 +65,17 @@ class SplatRenderer {
 
  private:
   void draw(const RenderView& view, const SplatSettings& settings);
+  void sortOnCpu(const RenderView& view, SortMode mode);
   void harvestVisibleCount();
+
+  // CPU sorting state.
+  std::vector<glm::vec3> positions_;
+  std::vector<uint32_t> cpuKeys_, cpuOrder_;
+  RadixScratch radixScratch_;
+  GlBuffer cpuOrderBuffer_;  // uint[count], all splats back-to-front
+  glm::mat4 lastSortedModelView_{0.0f};
+  SortMode lastCpuSortMode_ = SortMode::None;
+  bool cpuOrderValid_ = false;
 
   ShaderProgram preprocess_;
   ShaderProgram draw_;

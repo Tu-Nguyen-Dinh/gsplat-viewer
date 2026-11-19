@@ -5,16 +5,20 @@
 
 namespace gsv {
 
-// Offscreen render target with one RGBA8 color texture. Used by tests and
-// benchmarks so results do not depend on the window being visible.
+// Offscreen render target with one color texture. Used by tests and benchmarks so
+// results do not depend on the window being visible.
+//   RGBA8   : like the window (8 bits per channel, rounding after every blend)
+//   RGBA16F : half floats, blending happens with ~11 bits of precision
 class Framebuffer {
  public:
+  enum class Format { RGBA8, RGBA16F };
+
   Framebuffer() = default;
   ~Framebuffer();
   Framebuffer(const Framebuffer&) = delete;
   Framebuffer& operator=(const Framebuffer&) = delete;
 
-  bool create(int width, int height);
+  bool create(int width, int height, Format format = Format::RGBA8);
   void bind() const;  // binds and sets the viewport
   int width() const { return width_; }
   int height() const { return height_; }

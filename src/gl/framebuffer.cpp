@@ -9,12 +9,15 @@ Framebuffer::~Framebuffer() {
   if (color_) glDeleteTextures(1, &color_);
 }
 
-bool Framebuffer::create(int width, int height) {
+bool Framebuffer::create(int width, int height, Format format) {
   width_ = width;
   height_ = height;
   if (!color_) glGenTextures(1, &color_);
   glBindTexture(GL_TEXTURE_2D, color_);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+  if (format == Format::RGBA16F)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
+  else
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   if (!fbo_) glGenFramebuffers(1, &fbo_);

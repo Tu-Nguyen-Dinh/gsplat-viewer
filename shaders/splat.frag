@@ -26,7 +26,7 @@ void main() {
     float alpha = min(0.99, vConicOpacity.w * exp(power));
     if (alpha < 1.0 / 255.0) discard;   // invisible contribution: skip the blend
 
-    vec3 color = vColorDepth.rgb;
+    vec3 color = min(vColorDepth.rgb, vec3(1.0));   // SH can exceed 1; same clamp as the CPU reference
     if (uDebugView == 1) {
         color = heat(1.0 - (vColorDepth.a - uDepthRange.x) * uDepthRange.y);
     } else if (uDebugView == 2) {
