@@ -3,11 +3,14 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <fstream>
+#include <set>
 #include <sstream>
 
 #ifndef GSV_SHADER_DIR
 #define GSV_SHADER_DIR "shaders"
 #endif
+
+namespace gsv {
 
 std::string shaderPath(const std::string& file) { return std::string(GSV_SHADER_DIR) + "/" + file; }
 
@@ -22,12 +25,39 @@ bool readText(const std::string& path, std::string& out) {
   return true;
 }
 
-GLuint compileStage(GLenum stage, const std::string& file, std::string& log) {
+// Expands `#include "x"` recursively (each file at most once) and injects `defines`
+// after the #version line. Returns false if a file is missing.
+bool preprocess(const std::string& file, const std::string& defines, std::string& out, std::string& log,
+                std::set<std::string>& included) {
   std::string src;
   if (!readText(shaderPath(file), src)) {
     log += "Cannot read shader file: " + shaderPath(file) + "\n";
-    return 0;
+    return false;
   }
+  std::istringstream in(src);
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    if (line.rfind("#include", 0) == 0) {
+      const size_t a = line.find('"'), b = line.rfind('"');
+      if (a == std::string::npos || b <= a) {
+        log += file + ": malformed #include\n";
+        return false;
+      }
+      const std::string inc = line.substr(a + 1, b - a - 1);
+      if (included.insert(inc).second && !preprocess(inc, {}, out, log, included)) return false;
+      continue;
+    }
+    out += line + "\n";
+    if (line.rfind("#version", 0) == 0) out += defines;
+  }
+  return true;
+}
+
+GLuint compileStage(GLenum stage, const std::string& file, const std::string& defines, std::string& log) {
+  std::string src;
+  std::set<std::string> included;
+  if (!preprocess(file, defines, src, log, included)) return 0;
   GLuint s = glCreateShader(stage);
   const char* p = src.c_str();
   glShaderSource(s, 1, &p, nullptr);
@@ -39,7 +69,7 @@ GLuint compileStage(GLenum stage, const std::string& file, std::string& log) {
     glGetShaderiv(s, GL_INFO_LOG_LENGTH, &len);
     std::string msg(static_cast<size_t>(len > 1 ? len : 1), '\0');
     glGetShaderInfoLog(s, len, nullptr, msg.data());
-    log += file + ":\n" + msg + "\n";
+    log += file + " (line numbers count the expanded source):\n" + msg + "\n";
     glDeleteShader(s);
     return 0;
   }
@@ -77,10 +107,11 @@ void ShaderProgram::replace(GLuint newProgram) {
   uniformCache_.clear();
 }
 
-bool ShaderProgram::loadGraphics(const std::string& vertFile, const std::string& fragFile, std::string& log) {
+bool ShaderProgram::loadGraphics(const std::string& vertFile, const std::string& fragFile, std::string& log,
+                                 const std::string& defines) {
   log.clear();
-  GLuint vs = compileStage(GL_VERTEX_SHADER, vertFile, log);
-  GLuint fs = compileStage(GL_FRAGMENT_SHADER, fragFile, log);
+  GLuint vs = compileStage(GL_VERTEX_SHADER, vertFile, defines, log);
+  GLuint fs = compileStage(GL_FRAGMENT_SHADER, fragFile, defines, log);
   if (!vs || !fs) {
     if (vs) glDeleteShader(vs);
     if (fs) glDeleteShader(fs);
@@ -91,30 +122,37 @@ bool ShaderProgram::loadGraphics(const std::string& vertFile, const std::string&
   replace(prog);
   files_[0] = vertFile;
   files_[1] = fragFile;
+  defines_ = defines;
   isCompute_ = false;
   return true;
 }
 
-bool ShaderProgram::loadCompute(const std::string& compFile, std::string& log) {
+bool ShaderProgram::loadCompute(const std::string& compFile, std::string& log, const std::string& defines) {
   log.clear();
-  GLuint cs = compileStage(GL_COMPUTE_SHADER, compFile, log);
+  GLuint cs = compileStage(GL_COMPUTE_SHADER, compFile, defines, log);
   if (!cs) return false;
   GLuint prog = linkProgram({cs}, log);
   if (!prog) return false;
   replace(prog);
   files_[0] = compFile;
   files_[1].clear();
+  defines_ = defines;
   isCompute_ = true;
   return true;
 }
 
 bool ShaderProgram::reload(std::string& log) {
   if (files_[0].empty()) return false;
-  const std::string a = files_[0], b = files_[1];
-  return isCompute_ ? loadCompute(a, log) : loadGraphics(a, b, log);
+  const std::string a = files_[0], b = files_[1], d = defines_;
+  return isCompute_ ? loadCompute(a, log, d) : loadGraphics(a, b, log, d);
 }
 
 void ShaderProgram::use() const { glUseProgram(program_); }
+
+void ShaderProgram::dispatch1D(unsigned items, unsigned groupSize) const {
+  const unsigned groups = (items + groupSize - 1) / groupSize;
+  if (groups > 0) glDispatchCompute(groups, 1, 1);
+}
 
 GLint ShaderProgram::location(const char* name) {
   auto it = uniformCache_.find(name);
@@ -133,3 +171,5 @@ void ShaderProgram::set(const char* n, const glm::vec4& v) { glUniform4f(locatio
 void ShaderProgram::set(const char* n, const glm::mat4& m) {
   glUniformMatrix4fv(location(n), 1, GL_FALSE, glm::value_ptr(m));
 }
+
+}  // namespace gsv

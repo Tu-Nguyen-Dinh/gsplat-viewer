@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # Some dependencies declare very old minimum versions; CMake 4 needs this to configure them.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 
-project(gsplat_viewer VERSION 0.1.0 LANGUAGES C CXX)
+project(gsplat_viewer VERSION 0.7.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -12,6 +12,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
+
+option(GSV_BUILD_TESTS "Build the unit / GPU test executable" ON)
 
 # ---------------------------------------------------------------------------
 # Dependencies (downloaded at configure time, no package manager needed)
@@ -39,36 +41,77 @@ add_library(imgui STATIC
 target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 target_link_libraries(imgui PUBLIC glfw)
 
+# Warnings for our own targets only.
+function(gsv_warnings target)
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /W4 /utf-8)
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+endfunction()
+
 # ---------------------------------------------------------------------------
-# Viewer
+# gsplat_core: everything that is not UI (math, scene I/O, OpenGL, renderers).
+# Shared by the viewer and the tests.
 # ---------------------------------------------------------------------------
-add_executable(gsplat_viewer
-  src/main.cpp
-  src/camera.cpp
+add_library(gsplat_core STATIC
+  src/core/camera.cpp
+  src/core/gaussian_math.cpp
+  src/core/image.cpp
   src/gl/gl_loader.cpp
   src/gl/shader.cpp
+  src/gl/buffer.cpp
+  src/gl/framebuffer.cpp
   src/gl/gpu_timer.cpp
-  src/gl/screenshot.cpp
   src/scene/ply_io.cpp
   src/scene/demo_scene.cpp
-  src/render/point_renderer.cpp)
+  src/render/point_renderer.cpp
+  src/render/splat_renderer.cpp)
 
 # third_party/: Khronos GL headers and stb_image_write.h (single-file, vendored).
-target_include_directories(gsplat_viewer PRIVATE src third_party/khronos third_party/stb)
-target_link_libraries(gsplat_viewer PRIVATE glfw glm::glm imgui)
-target_compile_definitions(gsplat_viewer PRIVATE
+target_include_directories(gsplat_core PUBLIC src third_party/khronos PRIVATE third_party/stb)
+target_link_libraries(gsplat_core PUBLIC glfw glm::glm)
+target_compile_definitions(gsplat_core PUBLIC
   GLFW_INCLUDE_NONE
   GLM_ENABLE_EXPERIMENTAL
   # Shaders are read from the source tree so they can be edited and hot-reloaded (F5).
-  GSV_SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders")
+  GSV_SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
+  GSV_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data")
+gsv_warnings(gsplat_core)
 
-if(MSVC)
-  target_compile_options(gsplat_viewer PRIVATE /W4 /utf-8)
-else()
-  target_compile_options(gsplat_viewer PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+# ---------------------------------------------------------------------------
+# Viewer application
+# ---------------------------------------------------------------------------
+add_executable(gsplat_viewer
+  src/main.cpp
+  src/app/app.cpp
+  src/app/ui.cpp
+  src/app/options.cpp)
+target_link_libraries(gsplat_viewer PRIVATE gsplat_core imgui)
+gsv_warnings(gsplat_viewer)
 
 if(MINGW)
   # Single self-contained .exe: no libstdc++/libgcc DLLs needed at runtime.
   target_link_options(gsplat_viewer PRIVATE -static)
+endif()
+
+# ---------------------------------------------------------------------------
+# Tests: `ctest --test-dir build` (GPU tests open a hidden OpenGL window)
+# ---------------------------------------------------------------------------
+if(GSV_BUILD_TESTS)
+  enable_testing()
+  add_executable(gsplat_tests
+    tests/test_main.cpp
+    tests/gl_test_context.cpp
+    tests/test_math.cpp
+    tests/test_scene_io.cpp
+    tests/test_gpu_projection.cpp)
+  target_link_libraries(gsplat_tests PRIVATE gsplat_core)
+  target_include_directories(gsplat_tests PRIVATE tests)
+  gsv_warnings(gsplat_tests)
+  if(MINGW)
+    target_link_options(gsplat_tests PRIVATE -static)
+  endif()
+  add_test(NAME cpu_tests COMMAND gsplat_tests --cpu-only)
+  add_test(NAME gpu_tests COMMAND gsplat_tests --gpu-only)
 endif()

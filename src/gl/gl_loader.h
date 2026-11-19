@@ -72,8 +72,28 @@
   /* drawing & compute */                                           \
   X(PFNGLDRAWARRAYSPROC, glDrawArrays)                              \
   X(PFNGLDRAWARRAYSINSTANCEDPROC, glDrawArraysInstanced)            \
+  X(PFNGLDRAWARRAYSINDIRECTPROC, glDrawArraysIndirect)              \
   X(PFNGLDISPATCHCOMPUTEPROC, glDispatchCompute)                    \
   X(PFNGLMEMORYBARRIERPROC, glMemoryBarrier)                        \
+  X(PFNGLFINISHPROC, glFinish)                                      \
+  /* buffer readback & synchronisation */                           \
+  X(PFNGLGETBUFFERSUBDATAPROC, glGetBufferSubData)                  \
+  X(PFNGLCOPYBUFFERSUBDATAPROC, glCopyBufferSubData)                \
+  X(PFNGLFENCESYNCPROC, glFenceSync)                                \
+  X(PFNGLCLIENTWAITSYNCPROC, glClientWaitSync)                      \
+  X(PFNGLDELETESYNCPROC, glDeleteSync)                              \
+  /* textures & framebuffers (offscreen rendering for tests) */     \
+  X(PFNGLGENTEXTURESPROC, glGenTextures)                            \
+  X(PFNGLDELETETEXTURESPROC, glDeleteTextures)                      \
+  X(PFNGLBINDTEXTUREPROC, glBindTexture)                            \
+  X(PFNGLTEXIMAGE2DPROC, glTexImage2D)                              \
+  X(PFNGLTEXPARAMETERIPROC, glTexParameteri)                        \
+  X(PFNGLGENFRAMEBUFFERSPROC, glGenFramebuffers)                    \
+  X(PFNGLDELETEFRAMEBUFFERSPROC, glDeleteFramebuffers)              \
+  X(PFNGLBINDFRAMEBUFFERPROC, glBindFramebuffer)                    \
+  X(PFNGLFRAMEBUFFERTEXTURE2DPROC, glFramebufferTexture2D)          \
+  X(PFNGLCHECKFRAMEBUFFERSTATUSPROC, glCheckFramebufferStatus)      \
+  X(PFNGLBLITFRAMEBUFFERPROC, glBlitFramebuffer)                    \
   /* GPU timer queries */                                           \
   X(PFNGLGENQUERIESPROC, glGenQueries)                              \
   X(PFNGLDELETEQUERIESPROC, glDeleteQueries)                        \

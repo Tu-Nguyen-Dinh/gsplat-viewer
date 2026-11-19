@@ -1,5 +1,7 @@
 #include "gl/gpu_timer.h"
 
+namespace gsv {
+
 GpuTimer::~GpuTimer() {
   if (created_) glDeleteQueries(kRing, queries_);
 }
@@ -30,3 +32,5 @@ void GpuTimer::end() {
   pending_[index_] = true;
   index_ = (index_ + 1) % kRing;
 }
+
+}  // namespace gsv

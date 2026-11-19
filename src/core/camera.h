@@ -2,6 +2,8 @@
 
 #include <glm/glm.hpp>
 
+namespace gsv {
+
 // Orbit camera around a target point, plus free movement of the target (WASD).
 // World up is +Y; the camera looks along -Z in view space (OpenGL convention).
 class OrbitCamera {
@@ -32,3 +34,5 @@ class OrbitCamera {
   // Focal length in pixels for a viewport of the given height (needed by the splat projection).
   float focalPixels(float viewportHeight) const;
 };
+
+}  // namespace gsv

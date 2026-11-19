@@ -6,6 +6,8 @@
 
 #include <random>
 
+namespace gsv {
+
 namespace {
 
 // Quaternion rotating +Z onto `normal`, so a splat flattened along its local Z
@@ -70,3 +72,5 @@ GaussianScene makeDemoScene(size_t count, uint32_t seed) {
   s.sourceName = "demo scene";
   return s;
 }
+
+}  // namespace gsv

@@ -2,6 +2,8 @@
 
 #include "gl/gl_loader.h"
 
+namespace gsv {
+
 // Measures GPU time of a block of GL commands with GL_TIME_ELAPSED queries.
 // A ring of queries is used so reading a result never stalls the CPU waiting
 // for the GPU; the value reported is a few frames old, which is fine for stats.
@@ -25,3 +27,5 @@ class GpuTimer {
   bool created_ = false;
   double smoothedMs_ = 0.0;
 };
+
+}  // namespace gsv

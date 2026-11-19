@@ -7,6 +7,8 @@
 #include <sstream>
 #include <unordered_map>
 
+namespace gsv {
+
 namespace {
 
 enum class PlyType { I8, U8, I16, U16, I32, U32, F32, F64 };
@@ -270,3 +272,5 @@ bool savePly(const std::filesystem::path& path, const GaussianScene& s, std::str
   }
   return true;
 }
+
+}  // namespace gsv

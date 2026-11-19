@@ -7,6 +7,8 @@
 
 #include <string>
 
+namespace gsv {
+
 // Day 1 renderer: draws each Gaussian center as a round point with its base
 // (SH degree 0) color. Useful as a debug view and as a baseline for performance.
 class PointRenderer {
@@ -35,3 +37,5 @@ class PointRenderer {
   GLuint vbo_ = 0;
   GLsizei count_ = 0;
 };
+
+}  // namespace gsv

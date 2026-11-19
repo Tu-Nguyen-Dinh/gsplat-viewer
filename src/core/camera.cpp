@@ -1,9 +1,11 @@
-#include "camera.h"
+#include "core/camera.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <cmath>
+
+namespace gsv {
 
 void OrbitCamera::frameBounds(const glm::vec3& bmin, const glm::vec3& bmax) {
   target = 0.5f * (bmin + bmax);
@@ -45,3 +47,5 @@ glm::mat4 OrbitCamera::projection(float aspect) const {
 }
 
 float OrbitCamera::focalPixels(float viewportHeight) const { return 0.5f * viewportHeight / std::tan(0.5f * fovY); }
+
+}  // namespace gsv

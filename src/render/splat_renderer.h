@@ -1,0 +1,88 @@
+#pragma once
+
+#include "gl/buffer.h"
+#include "gl/gpu_timer.h"
+#include "gl/shader.h"
+#include "render/render_view.h"
+#include "scene/gaussian_scene.h"
+
+#include <array>
+#include <cstdint>
+#include <string>
+
+namespace gsv {
+
+enum class DebugView : int { Color = 0, Depth = 1, Overdraw = 2, Ellipses = 3 };
+
+struct SplatSettings {
+  int shDegree = 3;              // clamped to what the scene has
+  float splatScale = 1.0f;
+  bool orientedQuads = true;     // quad aligned with the ellipse axes (fewer wasted fragments)
+  bool cullOutsideViewport = true;
+  DebugView debugView = DebugView::Color;
+};
+
+struct SplatStats {
+  uint32_t total = 0;
+  uint32_t visible = 0;          // read back asynchronously, a few frames old
+  double preprocessMs = 0.0;     // GPU times
+  double drawMs = 0.0;
+};
+
+// GPU pipeline for 3D Gaussian Splatting:
+//   1. preprocess (compute): project + color + cull every Gaussian, append visible ones
+//   2. (sorting is added on Day 3/4)
+//   3. draw: one instanced quad per visible splat, alpha blended
+class SplatRenderer {
+ public:
+  bool init(std::string& log);
+  bool reloadShaders(std::string& log);
+  void upload(const GaussianScene& scene);
+  void render(const RenderView& view, const SplatSettings& settings);
+
+  const SplatStats& stats() const { return stats_; }
+  uint32_t splatCount() const { return count_; }
+  // Exposed for tests: per-splat projection results and the visible list.
+  const GlBuffer& projectedBuffer() const { return projected_; }
+  const GlBuffer& orderBuffer() const { return order_; }
+  const GlBuffer& drawCommandBuffer() const { return drawCommand_; }
+
+  // Runs only the preprocess pass (used by render() and by tests).
+  void preprocess(const RenderView& view, const SplatSettings& settings);
+
+ private:
+  void draw(const RenderView& view, const SplatSettings& settings);
+  void harvestVisibleCount();
+
+  ShaderProgram preprocess_;
+  ShaderProgram draw_;
+  GLuint vao_ = 0;
+
+  GlBuffer splats_;       // GpuSplat[count]
+  GlBuffer shRest_;       // float[count * 3 * restPerChannel]
+  GlBuffer projected_;    // ProjectedSplat[count]
+  GlBuffer order_;        // uint[count]  visible splat indices, in draw order
+  GlBuffer sortKeys_;     // uint[count]  depth keys of the visible splats
+  GlBuffer drawCommand_;  // DrawCommand (indirect draw arguments)
+
+  uint32_t count_ = 0;
+  int sceneShDegree_ = 0;
+  int restPerChannel_ = 0;
+  glm::vec2 depthRange_{0.0f, 1.0f};  // (zMin, 1 / (zMax - zMin)) for this frame
+  glm::vec3 boundsCenter_{0.0f};
+  float boundsRadius_ = 1.0f;
+
+  GpuTimer preprocessTimer_, drawTimer_;
+  SplatStats stats_;
+
+  // Asynchronous read-back of the visible count: copy to a staging buffer + fence,
+  // read it a few frames later when the fence has signaled (never stalls).
+  struct Readback {
+    GlBuffer staging;
+    GLsync fence = nullptr;
+  };
+  std::array<Readback, 3> readbacks_{};
+  int readbackIndex_ = 0;
+};
+
+}  // namespace gsv

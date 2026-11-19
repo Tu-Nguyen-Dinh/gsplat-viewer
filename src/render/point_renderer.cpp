@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <vector>
 
+namespace gsv {
+
 namespace {
 struct PointVertex {
   glm::vec3 position;
@@ -57,3 +59,5 @@ void PointRenderer::draw(const Params& p) {
   glDrawArrays(GL_POINTS, 0, count_);
   glBindVertexArray(0);
 }
+
+}  // namespace gsv

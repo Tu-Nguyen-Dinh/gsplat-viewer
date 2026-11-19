@@ -7,9 +7,15 @@
 #include <string>
 #include <unordered_map>
 
-// RAII wrapper around a linked GLSL program. Reloading keeps the previous
-// program alive when the new source fails to compile, so a typo during
-// hot-reload never leaves the viewer without a shader.
+namespace gsv {
+
+// RAII wrapper around a linked GLSL program.
+//
+// Source files are read from GSV_SHADER_DIR and pre-processed on the CPU:
+//   - `#include "file.glsl"` lines are replaced by the file contents (GLSL has no #include),
+//   - `defines` (e.g. "#define WORKGROUP 256\n") are inserted right after #version.
+// Reloading keeps the previous program alive when the new source fails to compile,
+// so a typo during hot-reload never leaves the viewer without a shader.
 class ShaderProgram {
  public:
   ShaderProgram() = default;
@@ -17,15 +23,18 @@ class ShaderProgram {
   ShaderProgram(const ShaderProgram&) = delete;
   ShaderProgram& operator=(const ShaderProgram&) = delete;
 
-  // Paths are relative to GSV_SHADER_DIR. On failure `log` holds the compiler output.
-  bool loadGraphics(const std::string& vertFile, const std::string& fragFile, std::string& log);
-  bool loadCompute(const std::string& compFile, std::string& log);
+  bool loadGraphics(const std::string& vertFile, const std::string& fragFile, std::string& log,
+                    const std::string& defines = {});
+  bool loadCompute(const std::string& compFile, std::string& log, const std::string& defines = {});
   // Re-reads the files passed to the last successful load*().
   bool reload(std::string& log);
 
   void use() const;
   GLuint id() const { return program_; }
   bool valid() const { return program_ != 0; }
+
+  // Dispatches enough work groups to cover `items` invocations (1D).
+  void dispatch1D(unsigned items, unsigned groupSize) const;
 
   void set(const char* name, int v);
   void set(const char* name, unsigned v);
@@ -41,8 +50,11 @@ class ShaderProgram {
 
   GLuint program_ = 0;
   std::string files_[2];
+  std::string defines_;
   bool isCompute_ = false;
   std::unordered_map<std::string, GLint> uniformCache_;
 };
 
 std::string shaderPath(const std::string& file);
+
+}  // namespace gsv

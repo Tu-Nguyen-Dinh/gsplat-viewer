@@ -1,0 +1,42 @@
+#version 430 core
+// Evaluates the 2D Gaussian at this pixel and outputs a premultiplied color.
+// Blending (ONE, ONE_MINUS_SRC_ALPHA) composites the splats back-to-front:
+//   C = alpha * c_splat + (1 - alpha) * C_behind
+
+in vec2 vOffset;
+flat in vec4 vConicOpacity;
+flat in vec4 vColorDepth;
+
+uniform int uDebugView;      // 0 = color, 1 = depth, 2 = overdraw, 3 = ellipse outlines
+uniform vec2 uDepthRange;    // (min, 1 / (max - min)) for the depth view
+
+out vec4 fragColor;
+
+// Compact "turbo"-like colormap for debug views.
+vec3 heat(float t) {
+    t = clamp(t, 0.0, 1.0);
+    return clamp(vec3(1.5 - abs(4.0 * t - 3.0), 1.5 - abs(4.0 * t - 2.0), 1.5 - abs(4.0 * t - 1.0)), 0.0, 1.0);
+}
+
+void main() {
+    vec3 c = vConicOpacity.xyz;
+    vec2 d = vOffset;
+    float power = -0.5 * (c.x * d.x * d.x + 2.0 * c.y * d.x * d.y + c.z * d.y * d.y);
+    if (power > 0.0) discard;
+    float alpha = min(0.99, vConicOpacity.w * exp(power));
+    if (alpha < 1.0 / 255.0) discard;   // invisible contribution: skip the blend
+
+    vec3 color = vColorDepth.rgb;
+    if (uDebugView == 1) {
+        color = heat(1.0 - (vColorDepth.a - uDepthRange.x) * uDepthRange.y);
+    } else if (uDebugView == 2) {
+        fragColor = vec4(vec3(0.03, 0.015, 0.005), 0.0);   // additive: brightness = layers
+        return;
+    } else if (uDebugView == 3) {
+        // power = -4.5 at 3 sigma; keep a thin ring around 2 sigma (power = -2)
+        if (abs(power + 2.0) > 0.12) discard;
+        fragColor = vec4(color, 1.0);
+        return;
+    }
+    fragColor = vec4(color * alpha, alpha);
+}
