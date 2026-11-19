@@ -30,7 +30,9 @@ void main() {
     if (uDebugView == 1) {
         color = heat(1.0 - (vColorDepth.a - uDepthRange.x) * uDepthRange.y);
     } else if (uDebugView == 2) {
-        fragColor = vec4(vec3(0.03, 0.015, 0.005), 0.0);   // additive: brightness = layers
+        // Additive: each layer adds a little. Red saturates after ~80 layers,
+        // green after ~200, blue after ~500, giving a black-red-yellow-white heat scale.
+        fragColor = vec4(0.012, 0.005, 0.002, 0.0);
         return;
     } else if (uDebugView == 3) {
         // power = -4.5 at 3 sigma; keep a thin ring around 2 sigma (power = -2)

@@ -22,8 +22,16 @@ void App::drawUi() {
   ImGui::SetNextItemWidth(-60);
   const bool enter = ImGui::InputText("##path", pathInput_, sizeof(pathInput_), ImGuiInputTextFlags_EnterReturnsTrue);
   ImGui::SameLine();
+  ImGui::BeginDisabled(isLoading());
   if (ImGui::Button("Load") || enter) pendingLoad_ = pathInput_;
-  ImGui::TextDisabled("or drag & drop a .ply onto the window");
+  ImGui::EndDisabled();
+  ImGui::TextDisabled("or drag & drop a .ply / .splat onto the window");
+  if (isLoading()) {
+    static const char kSpinner[] = "|/-\\";
+    const double t = glfwGetTime();
+    ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "%c Loading %s ... %.1f s", kSpinner[int(t * 8) & 3],
+                       loadingName_.c_str(), t - loadingStart_);
+  }
   if (ImGui::Button("Demo scene")) {
     setScene(makeDemoScene());
     status_ = "Demo scene";

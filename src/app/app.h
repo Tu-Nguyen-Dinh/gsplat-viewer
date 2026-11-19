@@ -6,7 +6,9 @@
 #include "render/point_renderer.h"
 #include "render/splat_renderer.h"
 #include "scene/gaussian_scene.h"
+#include "scene/scene_io.h"
 
+#include <future>
 #include <string>
 
 struct GLFWwindow;
@@ -26,7 +28,9 @@ class App {
   void frame(int fbWidth, int fbHeight);
 
   void setScene(GaussianScene&& scene);
-  void loadSceneFile(const std::string& utf8Path);
+  void loadSceneFile(const std::string& utf8Path);  // starts a background load
+  void pollLoading();                               // finishes it on the GL thread
+  bool isLoading() const { return loading_.valid(); }
   void frameScene();
   void reloadShaders();
   RenderView makeRenderView(int fbWidth, int fbHeight) const;
@@ -54,6 +58,13 @@ class App {
   float pointSize_ = 2.0f;
   float minOpacity_ = 0.05f;
   glm::vec3 background_{0.07f, 0.08f, 0.1f};
+
+  float distanceScale_ = 1.0f;  // multiplier on the framing distance (--distance)
+
+  // Background loading.
+  std::future<LoadResult> loading_;
+  std::string loadingName_;
+  double loadingStart_ = 0.0;
 
   // Input / status.
   std::string pendingLoad_;

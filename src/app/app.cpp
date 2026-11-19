@@ -97,6 +97,8 @@ int App::run(const Options& o) {
   splatSettings_.shDegree = o.shDegree;
   splatSettings_.sort = static_cast<SortMode>(o.sortMode);
   if (o.yaw > -999.0f) camera_.yaw = o.yaw;
+  splatSettings_.debugView = static_cast<DebugView>(o.debugView);
+  distanceScale_ = o.distanceScale;
   if (!createWindow(o)) {
     if (window_) shutdown();
     return 1;
@@ -130,6 +132,7 @@ int App::run(const Options& o) {
       path.swap(pendingLoad_);
       loadSceneFile(path);
     }
+    pollLoading();
 
     int fbW, fbH;
     glfwGetFramebufferSize(window_, &fbW, &fbH);
@@ -150,7 +153,7 @@ int App::run(const Options& o) {
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     // A few warm-up frames let the scene load and the GPU timers settle.
-    if (screenshotMode && ++frameIndex == 8) {
+    if (screenshotMode && !isLoading() && ++frameIndex == 8) {
       std::string error;
       if (savePng(pathFromUtf8(o.screenshot), readFramebuffer(0, fbW, fbH), error)) {
         const SplatStats& s = splats_.stats();
@@ -227,17 +230,34 @@ void App::setScene(GaussianScene&& scene) {
 }
 
 void App::loadSceneFile(const std::string& utf8Path) {
-  const auto t0 = std::chrono::steady_clock::now();
-  GaussianScene scene;
-  std::string error;
-  if (!loadPly(pathFromUtf8(utf8Path), scene, error)) {
-    status_ = "Load failed: " + error;
+  if (isLoading()) {
+    status_ = "Already loading " + loadingName_;
     return;
   }
-  setScene(std::move(scene));
-  loadMs_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-  status_ = "Loaded " + std::to_string(scene_.size()) + " splats";
+  // Parsing a large file takes seconds: do it on a worker thread so the window
+  // keeps rendering the current scene and stays responsive.
+  loading_ = loadSceneAsync(pathFromUtf8(utf8Path));
+  loadingName_ = utf8Path;
+  loadingStart_ = glfwGetTime();
   std::snprintf(pathInput_, sizeof(pathInput_), "%s", utf8Path.c_str());
+}
+
+void App::pollLoading() {
+  if (!isLoading() || loading_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+  LoadResult r = loading_.get();  // leaves the future invalid -> isLoading() == false
+  if (!r.ok) {
+    status_ = "Load failed: " + r.error;
+    return;
+  }
+  const auto t0 = std::chrono::steady_clock::now();
+  setScene(std::move(r.scene));  // GPU upload: must run on the thread that owns the GL context
+  const double uploadMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  loadMs_ = r.milliseconds + uploadMs;
+  char buf[256];
+  std::snprintf(buf, sizeof(buf), "Loaded %zu splats (parse %.0f ms, upload %.0f ms)%s", scene_.size(),
+                r.milliseconds, uploadMs, r.removedInvalid ? ", removed invalid splats: " : "");
+  status_ = buf;
+  if (r.removedInvalid) status_ += std::to_string(r.removedInvalid);
 }
 
 void App::frameScene() {
@@ -252,6 +272,7 @@ void App::frameScene() {
     hi = glm::max(hi, w);
   }
   camera_.frameBounds(lo, hi);
+  camera_.distance *= distanceScale_;
 }
 
 void App::reloadShaders() {

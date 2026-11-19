@@ -66,6 +66,7 @@ add_library(gsplat_core STATIC
   src/gl/gpu_timer.cpp
   src/scene/ply_io.cpp
   src/scene/demo_scene.cpp
+  src/scene/scene_io.cpp
   src/render/point_renderer.cpp
   src/render/splat_renderer.cpp
   src/render/reference_renderer.cpp

@@ -19,6 +19,8 @@ struct Options {
   float yaw = -1000.0f;        // camera yaw in radians (default: keep the camera's)
   int shDegree = 3;
   int sortMode = 3;            // SortMode: 0 none, 1 cpu-std, 2 cpu-radix, 3 gpu
+  int debugView = 0;           // DebugView: 0 color, 1 depth, 2 overdraw, 3 ellipses
+  float distanceScale = 1.0f;  // < 1 moves the camera closer than the default framing
 };
 
 // Returns false (and prints usage) on invalid arguments.

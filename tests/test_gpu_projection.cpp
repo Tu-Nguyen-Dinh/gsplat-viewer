@@ -93,6 +93,41 @@ GPU_TEST_CASE(gpu_preprocess_matches_cpu_projection) {
   CHECK(maxConicError < 1e-3f);
 }
 
+GPU_TEST_CASE(gpu_viewport_culling_reduces_work) {
+  // Close-up view: many splats are in front of the camera but outside the image.
+  const GaussianScene scene = makeDemoScene(50000, 12);
+  SplatRenderer renderer;
+  std::string log;
+  CHECK(renderer.init(log));
+  renderer.upload(scene);
+  RenderView view = testView(scene, 0.9f);
+  OrbitCamera cam;
+  cam.frameBounds(scene.boundsMin, scene.boundsMax);
+  cam.yaw = 0.9f;
+  cam.distance *= 0.25f;
+  view.view = cam.view();
+  view.cameraPosition = cam.position();
+  view.nearPlane = cam.nearPlane;
+
+  auto visibleCount = [&](bool cull) {
+    SplatSettings s;
+    s.cullOutsideViewport = cull;
+    renderer.preprocess(view, s);
+    uint32_t v = 0;
+    renderer.drawCommandBuffer().download(4, sizeof(v), &v);
+    return v;
+  };
+  const uint32_t withCull = visibleCount(true), withoutCull = visibleCount(false);
+  // Without viewport culling, only the near-plane test removes splats.
+  uint32_t inFront = 0;
+  for (const glm::vec3& p : scene.position)
+    if (-(view.view * glm::vec4(p, 1.0f)).z >= view.nearPlane) ++inFront;
+  std::printf("    close-up: %u in front of the camera, %u inside the viewport (%.0f%%)\n", withoutCull, withCull,
+              100.0 * withCull / withoutCull);
+  CHECK(withoutCull == inFront);
+  CHECK(withCull < withoutCull);
+}
+
 GPU_TEST_CASE(gpu_visible_list_is_a_permutation) {
   // Every visible splat index must appear exactly once in the draw list.
   const GaussianScene scene = makeDemoScene(5000, 5);

@@ -18,7 +18,9 @@ void printUsage() {
       "  --points             start in point mode\n"
       "  --yaw RADIANS        camera yaw around the scene\n"
       "  --sh 0..3            spherical harmonics degree\n"
-      "  --sort MODE          none | cpu-std | cpu-radix | gpu (default)\n");
+      "  --sort MODE          none | cpu-std | cpu-radix | gpu (default)\n"
+      "  --view MODE          color | depth | overdraw | ellipses\n"
+      "  --distance SCALE     camera distance relative to the default framing\n");
 }
 }  // namespace
 
@@ -58,6 +60,18 @@ bool parseOptions(int argc, char** argv, Options& o) {
       else if (m == "cpu-radix") o.sortMode = 2;
       else if (m == "gpu") o.sortMode = 3;
       else return printUsage(), false;
+    } else if (a == "--view") {
+      const char* v = next();
+      const std::string m = v ? v : "";
+      if (m == "color") o.debugView = 0;
+      else if (m == "depth") o.debugView = 1;
+      else if (m == "overdraw") o.debugView = 2;
+      else if (m == "ellipses") o.debugView = 3;
+      else return printUsage(), false;
+    } else if (a == "--distance") {
+      const char* v = next();
+      if (!v) return printUsage(), false;
+      o.distanceScale = std::strtof(v, nullptr);
     } else if (a == "--help" || a == "-h") {
       printUsage();
       return false;
