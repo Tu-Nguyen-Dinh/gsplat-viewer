@@ -96,9 +96,14 @@ void App::shutdown() {
 }
 
 int App::run(const Options& o) {
+  options_ = o;
   flipY_ = o.flipY;
+  blendFormat_ = o.blendFormat == "rgba8"     ? Framebuffer::Format::RGBA8
+                 : o.blendFormat == "rgb10a2" ? Framebuffer::Format::RGB10A2
+                                              : Framebuffer::Format::RGBA16F;
   mode_ = o.points ? RenderMode::Points : RenderMode::Splats;
   splatSettings_.shDegree = o.shDegree;
+  splatSettings_.depthKeyBits = o.keyBits;
   splatSettings_.sort = static_cast<SortMode>(o.sortMode);
   if (o.yaw > -999.0f) camera_.yaw = o.yaw;
   splatSettings_.debugView = static_cast<DebugView>(o.debugView);
@@ -185,7 +190,7 @@ int App::run(const Options& o) {
     // rendered offscreen at exactly the requested size (the OS may shrink the window).
     if (screenshotMode && !isLoading() && ++frameIndex == 8) {
       Framebuffer offscreen;
-      offscreen.create(o.width, o.height);
+      offscreen.create(o.width, o.height, targetFormat());
       frame(offscreen.id(), o.width, o.height);
       fbW = o.width;
       fbH = o.height;
@@ -231,7 +236,12 @@ RenderView App::makeRenderView(int w, int h) const {
 }
 
 void App::frame(GLuint fbo, int fbW, int fbH) {
-  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  // The window's back buffer is 8-bit: splats go through a half-float target first. Offscreen
+  // targets are created in targetFormat() already, and points are opaque (rounding is harmless).
+  const bool viaTarget = fbo == 0 && blendFormat_ != Framebuffer::Format::RGBA8 && mode_ == RenderMode::Splats;
+  if (viaTarget && (sceneTarget_.width() != fbW || sceneTarget_.height() != fbH || sceneTarget_.format() != blendFormat_))
+    sceneTarget_.create(fbW, fbH, blendFormat_);
+  glBindFramebuffer(GL_FRAMEBUFFER, viaTarget ? sceneTarget_.id() : fbo);
   glViewport(0, 0, fbW, fbH);
   glClearColor(background_.r, background_.g, background_.b, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -239,6 +249,12 @@ void App::frame(GLuint fbo, int fbW, int fbH) {
   const RenderView view = makeRenderView(fbW, fbH);
   if (mode_ == RenderMode::Splats) {
     splats_.render(view, splatSettings_);
+    if (viaTarget) {  // one conversion to 8 bits at the end, like the trainer
+      glBindFramebuffer(GL_READ_FRAMEBUFFER, sceneTarget_.id());
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+      glBlitFramebuffer(0, 0, fbW, fbH, 0, 0, fbW, fbH, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+      glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
   } else {
     PointRenderer::Params p;
     p.model = view.model;
@@ -261,6 +277,13 @@ void App::setScene(GaussianScene&& scene) {
   points_.upload(scene_);
   splats_.upload(scene_);
   frameScene();
+  // A new scene: forget the edit state of the previous one.
+  undoScene_ = {};
+  undoLabel_.clear();
+  scenePath_.clear();  // pollLoading() sets it for files; the demo scene has none
+  savePath_[0] = 0;
+  resetSelection();
+  selectionDirtyForFilter_ = true;
   const std::string title = "gsplat-viewer - " + scene_.sourceName;
   glfwSetWindowTitle(window_, title.c_str());
 }
@@ -288,6 +311,8 @@ void App::pollLoading() {
   loadColmapFor(loadingName_, colmapOverride_);  // before setScene: framing uses the orientation
   const auto t0 = std::chrono::steady_clock::now();
   setScene(std::move(r.scene));  // GPU upload: must run on the thread that owns the GL context
+  scenePath_ = loadingName_;
+  applyBatchEdits();
   const double uploadMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   loadMs_ = r.milliseconds + uploadMs;
   // A captured scene is only well reconstructed from where the phone was: framing its bounds from
@@ -301,17 +326,10 @@ void App::pollLoading() {
 }
 
 void App::frameScene() {
-  const glm::mat4 m = modelMatrix();
-  glm::vec3 lo(1e30f), hi(-1e30f);
-  for (int i = 0; i < 8; ++i) {  // transform the 8 corners of the bounds
-    const glm::vec3 c((i & 1) ? scene_.boundsMax.x : scene_.boundsMin.x,
-                      (i & 2) ? scene_.boundsMax.y : scene_.boundsMin.y,
-                      (i & 4) ? scene_.boundsMax.z : scene_.boundsMin.z);
-    const glm::vec3 w = glm::vec3(m * glm::vec4(c, 1.0f));
-    lo = glm::min(lo, w);
-    hi = glm::max(hi, w);
-  }
-  camera_.frameBounds(lo, hi);
+  // Frame the dense subject (scene_bounds.cpp), not the background and floaters around it.
+  // The model matrix only rotates, so the radius is unchanged.
+  const glm::vec3 center = glm::vec3(modelMatrix() * glm::vec4(scene_.focusCenter, 1.0f));
+  camera_.frameSphere(center, scene_.focusRadius, glm::length(scene_.boundsMax - scene_.boundsMin));
   camera_.distance *= distanceScale_;
   if (fixedCamera_) camera_.lookAt(fixedEye_, fixedTarget_);  // explicit camera from the command line
 }
@@ -385,13 +403,20 @@ void App::handleInput(float dt, int fbHeight) {
   lastY_ = y;
 
   if (!io.WantCaptureMouse) {
-    if (glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) camera_.orbit(dx, dy);
-    if (glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS ||
-        glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS)
-      camera_.pan(dx, dy, static_cast<float>(fbHeight));
+    const bool lmb = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    const bool rmb = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+    const bool mmb = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS;
+    if (flyMode_) {  // LMB/RMB look around, MMB pan
+      if (lmb || rmb) camera_.look(dx, dy);
+      if (mmb) camera_.pan(dx, dy, static_cast<float>(fbHeight));
+    } else {         // LMB orbit, RMB/MMB pan
+      if (lmb) camera_.orbit(dx, dy);
+      if (rmb || mmb) camera_.pan(dx, dy, static_cast<float>(fbHeight));
+    }
   }
   if (scrollAccum_ != 0.0f) {
-    camera_.zoom(scrollAccum_);
+    if (flyMode_) flySpeed_ = std::clamp(flySpeed_ * std::pow(1.25f, scrollAccum_), 0.01f, 100.0f);
+    else camera_.zoom(scrollAccum_);
     scrollAccum_ = 0.0f;
   }
   if (io.WantCaptureKeyboard) return;
@@ -412,12 +437,19 @@ void App::handleInput(float dt, int fbHeight) {
   if (down(GLFW_KEY_E)) dir.y += 1;
   if (down(GLFW_KEY_Q)) dir.y -= 1;
   if (dir != glm::vec3(0.0f)) {
-    const float sceneSize = glm::length(scene_.boundsMax - scene_.boundsMin);
-    const float speed = sceneSize * 0.3f * (down(GLFW_KEY_LEFT_SHIFT) ? 3.0f : 1.0f);
-    camera_.move(glm::normalize(dir), speed * dt);
+    // Speed in scene units per second, times dt: the distance covered does not depend on the FPS.
+    const float sceneSize = 2.0f * scene_.focusRadius;  // the subject's size, not the background's
+    const float speed = sceneSize * 0.3f * (down(GLFW_KEY_LEFT_SHIFT) ? 3.0f : 1.0f) * (flyMode_ ? flySpeed_ : 1.0f);
+    camera_.move(glm::normalize(dir), speed * dt, flyMode_);
   }
   if (pressed(GLFW_KEY_F5)) reloadShaders();
-  if (pressed(GLFW_KEY_F)) frameScene();
+  if (pressed(GLFW_KEY_F)) {
+    flyMode_ = !flyMode_;  // the camera state is shared, so the view does not jump
+    status_ = flyMode_ ? "Fly mode: drag to look, WASD/QE move, wheel = speed (F: back to orbit)" : "Orbit mode";
+  }
+  if (pressed(GLFW_KEY_R)) frameScene();
+  const bool ctrl = down(GLFW_KEY_LEFT_CONTROL) || down(GLFW_KEY_RIGHT_CONTROL);
+  if (pressed(GLFW_KEY_Z) && ctrl) undoEdit();
   if (pressed(GLFW_KEY_TAB)) mode_ = mode_ == RenderMode::Splats ? RenderMode::Points : RenderMode::Splats;
   if (pressed(GLFW_KEY_C)) goToCamera(cameraIndex_ + (down(GLFW_KEY_LEFT_SHIFT) ? -1 : 1));  // training cameras
 }

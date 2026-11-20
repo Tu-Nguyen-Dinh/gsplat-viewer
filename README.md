@@ -73,18 +73,35 @@ build/gsplat_viewer --gen demo.ply 1000000   # write a procedural scene
 build/gsplat_viewer demo.ply --bench --size 1920x1080 --csv docs/benchmarks.csv
 build/gsplat_viewer demo.ply --turntable frames/ --frames 72
 build/gsplat_viewer demo.ply --view overdraw --screenshot overdraw.png
+build/gsplat_viewer room.ply --eval          # PSNR/SSIM on the held-out photos (needs the COLMAP model)
+build/gsplat_viewer truck.splat --flip-y --crop-sphere -0.57,-0.6,-0.4,3.2 --save-edited truck_only.ply
 ```
 
 Other formats (`.spz`, `.sog`, `.ksplat`, ...) convert with `npx @playcanvas/splat-transform in.spz out.ply`.
 
 | Input | Action |
 |---|---|
-| Left mouse / right or middle mouse / wheel | Orbit / pan / zoom |
-| W A S D, Q E (+Shift) | Move |
-| F · Tab · F5 | Frame scene · splats ↔ points · reload shaders |
+| Orbit mode: left / right or middle mouse / wheel | Orbit / pan / zoom |
+| Fly mode: left or right mouse / middle mouse / wheel | Look around / pan / speed |
+| W A S D, Q E (+Shift) | Move (fly mode: Q/E straight down/up) |
+| F · R · C | Orbit ↔ fly · frame the scene · next training camera |
+| Tab · F5 · Ctrl+Z | Splats ↔ points · reload shaders · undo the last edit |
 
-The UI exposes sort mode (none / CPU std::sort / CPU radix / GPU radix), 16-bit keys, SH degree,
-oriented vs square quads, viewport culling and debug views (depth, overdraw, ellipse outlines).
+The camera opens on the dense subject of the scene (the radial density profile ignores background
+and floaters), or on the first training camera when a COLMAP model sits next to the file.
+The UI exposes sort mode and depth-key precision (16 / 24 / 32 bits), blending precision
+(8-bit, 10-bit, 16-bit float), SH degree, oriented vs square quads, viewport culling and debug
+views (depth, overdraw, ellipse outlines).
+
+**Editing** (Edit panel or command line): select with a box or a sphere, delete inside or crop,
+filter nearly transparent or oversized splats, undo one step, and save a standard 3DGS PLY
+(checked: it reloads bit-exact and PlayCanvas splat-transform renders it at 45 dB from ours).
+
+![Before / after cropping the truck out of its street (2.5 M → 551 K splats)](docs/images/v11_crop_truck.jpg)
+
+On a scene captured from inside a room, the simple filters are not floater detectors: the
+large splats are the walls (removing the 1 406 splats larger than 1 unit drops the held-out
+PSNR from 30.3 to 14.8 dB), so `--eval` is the way to check an edit.
 
 ![Debug views: depth, overdraw, ellipse outlines](docs/images/day5_debug_views.png)
 

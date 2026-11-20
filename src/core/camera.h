@@ -18,14 +18,20 @@ class OrbitCamera {
 
   // Places the camera so the axis-aligned box is fully visible.
   void frameBounds(const glm::vec3& boundsMin, const glm::vec3& boundsMax);
+  // Places the camera so the sphere fills the view; sceneExtent (diameter of everything) sets the far plane.
+  void frameSphere(const glm::vec3& center, float radius, float sceneExtent = 0.0f);
   // Places the camera at `eye` looking at `center` (inverse of position(): yaw/pitch from the direction).
   void lookAt(const glm::vec3& eye, const glm::vec3& center);
 
   void orbit(float dxPixels, float dyPixels);
+  // Fly-mode mouse look: turns the view around the eye (the eye stays put, the target moves).
+  // Same state as orbit(), so switching between the two modes never changes the view matrix.
+  void look(float dxPixels, float dyPixels);
   void pan(float dxPixels, float dyPixels, float viewportHeight);
   void zoom(float wheelSteps);
-  // Moves the target in camera space: x = right, y = up, z = forward.
-  void move(const glm::vec3& cameraSpaceDir, float amount);
+  // Moves the target (and the eye with it): x = right, y = up, z = forward. With worldUp, y is
+  // the world's +Y instead of the camera's up (fly mode: Q/E go straight up and down).
+  void move(const glm::vec3& cameraSpaceDir, float amount, bool worldUp = false);
 
   glm::vec3 position() const;
   glm::vec3 forward() const;

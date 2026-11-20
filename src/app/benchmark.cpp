@@ -13,6 +13,7 @@
 #include <GLFW/glfw3.h>
 #include <glm/gtc/constants.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <fstream>
@@ -40,6 +41,8 @@ std::vector<BenchConfig> makeConfigs() {
   s = base;
   s.depthKeyBits = 16;
   c.push_back({"gpu sort 16-bit keys", s, true});
+  s.depthKeyBits = 24;
+  c.push_back({"gpu sort 24-bit keys", s, true});
   s = base;
   s.orientedQuads = false;
   c.push_back({"square quads", s, true});
@@ -77,7 +80,7 @@ int App::runBenchmark(const Options& o) {
     // window smaller than asked (e.g. 1920x1080 does not fit next to the taskbar).
     const int fbW = o.width, fbH = o.height;
     Framebuffer target;
-    target.create(fbW, fbH);
+    target.create(fbW, fbH, targetFormat());
     int winW, winH;
     glfwGetFramebufferSize(window_, &winW, &winH);
 
@@ -116,17 +119,26 @@ int App::runBenchmark(const Options& o) {
     }
     glFinish();
     splats_.resetAverages();
+    // Frame time = MEDIAN of the per-frame intervals, not total / frames: a single hitch outside the
+    // renderer (another process, a GPU clock change, the compositor) used to add several ms to the
+    // mean of a whole configuration and made 16-bit keys look slower than 32-bit ones.
     double cpuSortSum = 0.0;
-    const auto t0 = std::chrono::steady_clock::now();
+    std::vector<double> intervals;
+    intervals.reserve(static_cast<size_t>(frames));
+    auto last = std::chrono::steady_clock::now();
     for (int f = 0; f < frames; ++f) {
       renderFrame(baseYaw + glm::two_pi<float>() * static_cast<float>(f) / static_cast<float>(frames), cfg.settings);
       cpuSortSum += splats_.stats().cpuSortMs;
       present();
       glfwPollEvents();
+      const auto now = std::chrono::steady_clock::now();
+      intervals.push_back(std::chrono::duration<double, std::milli>(now - last).count());
+      last = now;
     }
     glFinish();
-    const double frameMs =
-        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / frames;
+    std::nth_element(intervals.begin(), intervals.begin() + static_cast<std::ptrdiff_t>(intervals.size() / 2),
+                     intervals.end());
+    const double frameMs = intervals[intervals.size() / 2];
     for (int i = 0; i < 6; ++i) renderFrame(baseYaw, cfg.settings);  // flush pending timer queries
     glFinish();
 
@@ -160,7 +172,7 @@ int App::runTurntable(const Options& o) {
   std::error_code ec;
   std::filesystem::create_directories(pathFromUtf8(o.turntableDir), ec);
   Framebuffer target;
-  target.create(o.width, o.height);
+  target.create(o.width, o.height, targetFormat());
   const float baseYaw = camera_.yaw;
   for (int f = 0; f < o.benchFrames; ++f) {
     camera_.yaw = baseYaw + glm::two_pi<float>() * static_cast<float>(f) / static_cast<float>(o.benchFrames);

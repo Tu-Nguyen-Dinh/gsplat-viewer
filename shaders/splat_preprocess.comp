@@ -30,16 +30,19 @@ uniform int uShDegree;
 uniform uint uRestPerChannel;
 uniform uint uShStride;      // uints per splat in shData (45 for float32, 23 for float16)
 uniform vec2 uDepthRange;    // (min, 1 / (max - min)) for 16-bit sort keys
-uniform int uKeyBits;        // 16 or 32
+uniform int uKeyBits;        // 16, 24 or 32
 
 // Sort key such that ASCENDING order = FAR to NEAR (back-to-front drawing).
 uint depthKey(float depth) {
-    if (uKeyBits == 16) {
+    if (uKeyBits == 16) {   // linear in the scene's depth range: depths outside it are clamped
         float t = clamp((depth - uDepthRange.x) * uDepthRange.y, 0.0, 1.0);
         return 0xFFFFu - uint(t * 65535.0);
     }
     // For positive floats the IEEE-754 bit pattern increases with the value.
-    return 0xFFFFFFFFu - floatBitsToUint(depth);
+    uint key = 0xFFFFFFFFu - floatBitsToUint(depth);
+    // 24 bits: drop the 8 lowest mantissa bits. Still floating point, so no range and no
+    // clamping; relative precision 2^-15 (0.15 mm at 5 m) with 6 radix passes instead of 8.
+    return uKeyBits == 24 ? key >> 8 : key;
 }
 
 void main() {
@@ -57,9 +60,14 @@ void main() {
     vec3 dir = normalize(s.positionOpacity.xyz - uCameraPos);
     vec3 color = evalSphericalHarmonics(uShDegree, dir, s.dc.rgb, i * uShStride, uRestPerChannel);
 
-    projected[i].centerDepthRadius = vec4(p.center, p.depth, p.radius);
+    // Opacity-aware quad: the fragment shader discards alpha < 1/255, i.e. beyond
+    // sigma * sqrt(2 ln(255 opacity)). A faint splat (opacity 0.05: 1.7 sigma) would otherwise
+    // rasterize a 3-sigma quad of which ~70 % is discarded. Same image, fewer fragments.
+    float extent = min(kSigmaExtent, sqrt(2.0 * log(255.0 * s.positionOpacity.w)));
+    float shrink = extent / kSigmaExtent;
+    projected[i].centerDepthRadius = vec4(p.center, p.depth, ceil(p.radius * shrink));
     projected[i].conicOpacity = vec4(p.conic, s.positionOpacity.w);
-    projected[i].axes = vec4(p.axisMajor, p.axisMinor);
+    projected[i].axes = vec4(p.axisMajor * shrink, p.axisMinor * shrink);
     projected[i].color = vec4(color, 1.0);
 
     // Append to the visible list. The counter doubles as the instance count of the indirect draw.

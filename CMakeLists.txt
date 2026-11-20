@@ -70,6 +70,8 @@ add_library(gsplat_core STATIC
   src/scene/demo_scene.cpp
   src/scene/scene_io.cpp
   src/scene/colmap_io.cpp
+  src/scene/scene_bounds.cpp
+  src/scene/scene_edit.cpp
   src/render/point_renderer.cpp
   src/render/splat_renderer.cpp
   src/render/reference_renderer.cpp
@@ -100,7 +102,8 @@ add_executable(gsplat_viewer
   src/app/ui.cpp
   src/app/options.cpp
   src/app/benchmark.cpp
-  src/app/evaluate.cpp)
+  src/app/evaluate.cpp
+  src/app/edit_ui.cpp)
 target_link_libraries(gsplat_viewer PRIVATE gsplat_core imgui)
 gsv_warnings(gsplat_viewer)
 
@@ -133,6 +136,9 @@ if(GSV_BUILD_TESTS)
     tests/test_frame_select.cpp
     tests/test_colmap.cpp
     tests/test_image_metrics.cpp
+    tests/test_scene_bounds.cpp
+    tests/test_camera.cpp
+    tests/test_scene_edit.cpp
     tests/test_sorting.cpp
     tests/test_gpu_projection.cpp
     tests/test_gpu_render.cpp

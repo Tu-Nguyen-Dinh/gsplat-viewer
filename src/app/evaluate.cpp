@@ -139,9 +139,9 @@ int App::runEvaluation(const Options& o) {
     view.projection = glm::perspective(view.fovY, view.aspect(), view.nearPlane, 1000.0f);
 
     Framebuffer target;
-    // Half-float target: hundreds of low-alpha splats blended into 8 bits per channel lose
-    // precision at every step; the trainer accumulates in fp32 and quantizes only once.
-    target.create(cam.width, cam.height, Framebuffer::Format::RGBA16F);
+    // Precise target (--blend, not rgba8): hundreds of low-alpha splats blended into 8 bits per
+    // channel lose precision at every step; the trainer accumulates in fp32 and quantizes once.
+    target.create(cam.width, cam.height, targetFormat());
     target.bind();
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

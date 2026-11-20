@@ -12,10 +12,13 @@ Framebuffer::~Framebuffer() {
 bool Framebuffer::create(int width, int height, Format format) {
   width_ = width;
   height_ = height;
+  format_ = format;
   if (!color_) glGenTextures(1, &color_);
   glBindTexture(GL_TEXTURE_2D, color_);
   if (format == Format::RGBA16F)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
+  else if (format == Format::RGB10A2)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB10_A2, width, height, 0, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, nullptr);
   else
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);

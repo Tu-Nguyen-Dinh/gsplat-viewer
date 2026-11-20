@@ -73,10 +73,20 @@ void App::drawUi() {
     ImGui::Combo("Sort", &sort, "None (wrong order)\0CPU std::sort\0CPU radix sort\0GPU radix sort\0");
     splatSettings_.sort = static_cast<SortMode>(sort);
     if (splatSettings_.sort == SortMode::GpuRadix) {
-      bool key16 = splatSettings_.depthKeyBits == 16;
-      if (ImGui::Checkbox("16-bit depth keys (4 passes instead of 8)", &key16))
-        splatSettings_.depthKeyBits = key16 ? 16 : 32;
+      int keys = splatSettings_.depthKeyBits == 16 ? 0 : splatSettings_.depthKeyBits == 24 ? 1 : 2;
+      if (ImGui::Combo("Depth keys", &keys, "16-bit linear (4 passes)\0" "24-bit float (6 passes)\0"
+                                             "32-bit float (8 passes)\0"))
+        splatSettings_.depthKeyBits = keys == 0 ? 16 : keys == 1 ? 24 : 32;
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Sort key precision. 24-bit renders the same image as 32-bit on real scenes;\n"
+                          "16-bit loses ~0.45 dB on a captured room (depth range clamping / steps).");
     }
+    int blend = static_cast<int>(blendFormat_);  // enum order: RGBA8, RGB10A2, RGBA16F
+    ImGui::Combo("Blending", &blend, "8-bit (fastest)\0" "10-bit\0" "16-bit float (most precise)\0");
+    blendFormat_ = static_cast<Framebuffer::Format>(blend);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Precision of the buffer splats are blended into.\n8-bit rounds after every splat and loses "
+                        "faint ones\n(-0.35 dB PSNR on a real scene) but blends at full speed on most GPUs.");
     ImGui::SliderInt("SH degree", &splatSettings_.shDegree, 0, 3);
     ImGui::SliderFloat("Splat scale", &splatSettings_.splatScale, 0.1f, 2.0f);
     ImGui::Checkbox("Oriented quads", &splatSettings_.orientedQuads);
@@ -96,8 +106,19 @@ void App::drawUi() {
   ImGui::SeparatorText("Camera");
   const glm::vec3 p = camera_.position();
   ImGui::Text("pos (%.2f, %.2f, %.2f)", p.x, p.y, p.z);
-  if (ImGui::Button("Frame scene (F)")) frameScene();
-  ImGui::TextDisabled("LMB orbit | RMB/MMB pan | wheel zoom\nWASD/QE move, Shift = faster");
+  int camMode = flyMode_ ? 1 : 0;
+  ImGui::RadioButton("Orbit", &camMode, 0);
+  ImGui::SameLine();
+  ImGui::RadioButton("Fly (F)", &camMode, 1);
+  flyMode_ = camMode == 1;  // shared camera state: switching never moves the view
+  ImGui::SameLine();
+  if (ImGui::Button("Frame scene (R)")) frameScene();
+  if (flyMode_) {
+    ImGui::SliderFloat("Fly speed", &flySpeed_, 0.01f, 100.0f, "%.2fx", ImGuiSliderFlags_Logarithmic);
+    ImGui::TextDisabled("LMB/RMB look | MMB pan | wheel = speed\nWASD move, Q/E down/up, Shift = faster");
+  } else {
+    ImGui::TextDisabled("LMB orbit | RMB/MMB pan | wheel zoom\nWASD/QE move, Shift = faster");
+  }
 
   // ---- Training cameras (COLMAP) -------------------------------------------------
   if (!colmap_.images.empty()) {
@@ -114,6 +135,8 @@ void App::drawUi() {
     }
   }
 
+  drawEditPanel();  // edit_ui.cpp (collapsible)
+
   // ---- Dev -----------------------------------------------------------------
   ImGui::SeparatorText("Dev");
   if (ImGui::Button("Reload shaders (F5)")) reloadShaders();
@@ -122,6 +145,7 @@ void App::drawUi() {
   ImGui::End();
 
   if (showCameras_) drawCameras();
+  drawSelection();
 }
 
 // Draws each training camera as a small pyramid (frustum) with ImGui's background draw list:

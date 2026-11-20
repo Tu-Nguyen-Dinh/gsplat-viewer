@@ -46,3 +46,46 @@ Reproduce: `build/gsplat_viewer.exe scene.ply --bench --size 1920x1080 --frames 
 |---|---|---|
 | Parse + validate PLY | worker | 365 ms |
 | Precompute + GPU upload (splat renderer) | main | 131 ms |
+
+## Blending precision vs speed (v1.1, 20/11/2026)
+
+Splats are blended back to front into a render target. An 8-bit target rounds after every
+blend, so faint splats (α·|c − C| below half a step) vanish. Real captured scenes have hundreds of
+such layers per pixel. `--blend` / the "Blending" combo choose the target; the window then gets a single blit.
+
+| Target | Real scene: PSNR on 24 held-out photos (Brush: 30.54 dB) | Synthetic vs CPU reference | truck 1080p draw | truck FPS (32-bit keys) | truck FPS (16-bit keys) |
+|---|---|---|---|---|---|
+| RGBA8 (v1) | 29.91 dB (−0.62) | 51.6 dB | 4.64 ms | 85 | 111 |
+| RGB10A2 | 30.23 dB (−0.31) | 53.5 dB | 6.71 ms | 73 | 92 |
+| RGBA16F (default) | **30.26 dB (−0.28)** | 54.4 dB | 6.74 ms | 73 | 92 |
+
+RGB10A2 has the same 32 bits per pixel as RGBA8 but blends just as slowly as RGBA16F: the cost is
+not memory bandwidth but the blend rate (the RTX 3060 blends RGBA8 at full rate, other formats at
+about half). Real scene: `scenes/phong` (phone video, 232 553 splats, `gsplat_viewer phong.ply --eval --blend X`).
+
+## Camera framing on load (v1.1)
+
+`computeFocus` (scene_bounds.cpp) frames the densest region instead of the 2–98 % per-axis bounds:
+truck opens on the truck (≈ 40 % of the frame) without `--camera-pos`; cost on 2.5 M splats: 33 ms
+(200k-sample histogram; a full sort took 370 ms).
+
+## Task 2.6: sort keys, quad size, benchmark noise (v1.1, 21/11/2026)
+
+truck.splat, 1920×1080, orbit, frame = **median** of 240 frame intervals (was the mean):
+
+| Config | sort | draw | FPS, RGBA16F blend (default) | FPS, RGBA8 blend | Real-scene PSNR (phong, 24 test views) |
+|---|---|---|---|---|---|
+| 32-bit float keys (8 passes) | 6.0–6.3 ms | 6.5 / 4.5 ms | 69–74 | 84–87 | 30.26 dB |
+| **24-bit float keys (6 passes, default)** | 4.5–4.8 ms | 6.5 / 4.7 ms | **74–78** | **96** | **30.26 dB** |
+| 16-bit linear keys (4 passes) | 3.0 ms | 6.9 / 4.8 ms | 88–93 | 109 | 29.80 dB (−0.46) |
+
+- **24-bit keys** = the top 24 bits of the float depth: no depth range, no clamping, relative
+  precision 2⁻¹⁵. Same PSNR as 32-bit on the real scene; image 70 dB from the 32-bit one on the
+  synthetic test. 16-bit linear keys lose 0.46 dB on a captured room, so they stay optional.
+- **Opacity-aware quads**: a splat is drawn out to σ·√(2 ln(255·α)) (≤ 3σ) instead of 3σ, where its
+  alpha falls below the 1/255 discard threshold. Rasterized fragments 245.4 M → 179.8 M (−27 %),
+  blended fragments unchanged (151.6 M → 151.5 M), test PSNR vs reference unchanged (54.39 dB).
+- **"16-bit keys slower than 32-bit" (v1.0 baseline)** did not reproduce in 10+ runs: 16-bit is
+  always fastest. The v1.0 frame time was total / frames, so one hitch outside the renderer
+  (seen once: 21 ms frame for 13 ms of GPU work) inflated a whole configuration. The benchmark now
+  reports the median interval; repeated runs agree within ±1 FPS.

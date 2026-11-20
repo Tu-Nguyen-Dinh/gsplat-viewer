@@ -31,7 +31,7 @@ struct SplatSettings {
   bool orientedQuads = true;     // quad aligned with the ellipse axes (fewer wasted fragments)
   bool cullOutsideViewport = true;
   SortMode sort = SortMode::GpuRadix;
-  int depthKeyBits = 32;         // 32: exact float depth (8 passes); 16: quantized depth (4 passes)
+  int depthKeyBits = 32;         // 32: exact float depth (8 passes); 24: top 24 float bits (6); 16: linear in range (4)
   DebugView debugView = DebugView::Color;
   bool countCoverage = false;    // benchmark only: shade every rasterized fragment (no discard)
 };

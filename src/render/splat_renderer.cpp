@@ -144,7 +144,8 @@ void SplatRenderer::preprocess(const RenderView& view, const SplatSettings& sett
   preprocess_.set("uShStride", shStride_);
   preprocess_.set("uShHalf", halfSh_ ? 1 : 0);
   preprocess_.set("uDepthRange", depthRange_);
-  preprocess_.set("uKeyBits", settings.depthKeyBits == 16 ? 16 : 32);
+  const int keyBits = settings.depthKeyBits == 16 ? 16 : settings.depthKeyBits == 24 ? 24 : 32;
+  preprocess_.set("uKeyBits", keyBits);
   preprocess_.dispatch1D(count_, kPreprocessGroup);
 
   // The draw reads the SSBOs in the vertex shader and the counter as indirect arguments.
@@ -206,7 +207,8 @@ void SplatRenderer::render(const RenderView& view, const SplatSettings& settings
     // Sorts the visible list in place: keys = depth keys, values = splat indices.
     // The count is the instanceCount field (uint #1) of the indirect draw command.
     sortTimer_.begin();
-    gpuSort_.sort(sortKeys_, order_, drawCommand_, 1, count_, settings.depthKeyBits == 16 ? 16 : 32);
+    const int keyBits = settings.depthKeyBits == 16 ? 16 : settings.depthKeyBits == 24 ? 24 : 32;
+    gpuSort_.sort(sortKeys_, order_, drawCommand_, 1, count_, keyBits);
     sortTimer_.end();
     stats_.gpuSortMs = sortTimer_.milliseconds();
   }

@@ -8,11 +8,16 @@
 namespace gsv {
 
 void OrbitCamera::frameBounds(const glm::vec3& bmin, const glm::vec3& bmax) {
-  target = 0.5f * (bmin + bmax);
-  const float radius = std::max(0.5f * glm::length(bmax - bmin), 1e-3f);
+  frameSphere(0.5f * (bmin + bmax), 0.5f * glm::length(bmax - bmin));
+}
+
+void OrbitCamera::frameSphere(const glm::vec3& center, float radius, float sceneExtent) {
+  target = center;
+  radius = std::max(radius, 1e-3f);
   distance = radius / std::sin(0.5f * fovY) * 1.05f;
   nearPlane = std::max(distance * 0.002f, 1e-3f);
-  farPlane = distance + radius * 50.0f;
+  // Keep the background visible: the far plane covers the whole scene, not only the framed part.
+  farPlane = distance + std::max(radius * 50.0f, sceneExtent * 2.0f);
 }
 
 void OrbitCamera::lookAt(const glm::vec3& eye, const glm::vec3& center) {
@@ -31,6 +36,14 @@ void OrbitCamera::orbit(float dx, float dy) {
   pitch = std::clamp(pitch + dy * 0.005f, -1.55f, 1.55f);
 }
 
+void OrbitCamera::look(float dx, float dy) {
+  // Reuses orbit()'s yaw/pitch update: with the eye fixed, decreasing yaw turns the view to the
+  // right and increasing pitch tilts it down, i.e. drag right = look right (first-person style).
+  const glm::vec3 eye = position();
+  orbit(dx, dy);
+  target = eye - (position() - target);  // position() - target = offset for the new yaw/pitch
+}
+
 void OrbitCamera::pan(float dx, float dy, float viewportHeight) {
   const float worldPerPixel = 2.0f * distance * std::tan(0.5f * fovY) / std::max(viewportHeight, 1.0f);
   target += (-right() * dx + up() * dy) * worldPerPixel;
@@ -38,8 +51,9 @@ void OrbitCamera::pan(float dx, float dy, float viewportHeight) {
 
 void OrbitCamera::zoom(float steps) { distance = std::max(distance * std::pow(0.88f, steps), 1e-3f); }
 
-void OrbitCamera::move(const glm::vec3& d, float amount) {
-  target += (right() * d.x + up() * d.y + forward() * d.z) * amount;
+void OrbitCamera::move(const glm::vec3& d, float amount, bool worldUp) {
+  const glm::vec3 upAxis = worldUp ? glm::vec3(0.0f, 1.0f, 0.0f) : up();
+  target += (right() * d.x + upAxis * d.y + forward() * d.z) * amount;
 }
 
 glm::vec3 OrbitCamera::position() const {

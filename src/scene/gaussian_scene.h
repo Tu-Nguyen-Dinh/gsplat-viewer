@@ -30,6 +30,9 @@ struct GaussianScene {
   // Robust bounds (2nd..98th percentile per axis) so a few far "floaters"
   // do not break camera framing.
   glm::vec3 boundsMin{-1.0f}, boundsMax{1.0f};
+  // The dense subject of the scene (computeFocus): what the camera frames on load.
+  glm::vec3 focusCenter{0.0f};
+  float focusRadius = 1.0f;
 
   std::string sourceName;
 
@@ -48,6 +51,9 @@ inline glm::vec3 baseColor(const GaussianScene& s, size_t i) {
   return glm::clamp(glm::vec3(0.5f) + kShC0 * s.shDC[i], glm::vec3(0.0f), glm::vec3(1.0f));
 }
 
+// Fills boundsMin/Max (2nd..98th percentile per axis) and then the focus (computeFocus).
 void computeRobustBounds(GaussianScene& scene);
+// Center and radius of the densest region around the median position (see scene_bounds.cpp).
+void computeFocus(GaussianScene& scene);
 
 }  // namespace gsv

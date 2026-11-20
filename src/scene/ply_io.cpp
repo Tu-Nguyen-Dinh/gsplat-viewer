@@ -57,20 +57,6 @@ float readValue(const uint8_t* p, PlyType t) {
 
 }  // namespace
 
-void computeRobustBounds(GaussianScene& scene) {
-  const size_t n = scene.size();
-  if (n == 0) return;
-  std::vector<float> axis(n);
-  for (int a = 0; a < 3; ++a) {
-    for (size_t i = 0; i < n; ++i) axis[i] = scene.position[i][a];
-    const size_t lo = n / 50, hi = n - 1 - n / 50;
-    std::nth_element(axis.begin(), axis.begin() + static_cast<std::ptrdiff_t>(lo), axis.end());
-    scene.boundsMin[a] = axis[lo];
-    std::nth_element(axis.begin(), axis.begin() + static_cast<std::ptrdiff_t>(hi), axis.end());
-    scene.boundsMax[a] = axis[hi];
-  }
-}
-
 bool loadPly(const std::filesystem::path& path, GaussianScene& out, std::string& error) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {

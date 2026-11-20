@@ -77,11 +77,14 @@ GPU_TEST_CASE(gpu_render_matches_cpu_reference) {
     const Image ref = renderReference(scene, view, referenceFor(s));
     const Image gpu16 = renderGpu(renderer, view, s, Framebuffer::Format::RGBA16F);
     const Image gpu8 = renderGpu(renderer, view, s, Framebuffer::Format::RGBA8);
-    const double p16 = psnr(ref, gpu16), p8 = psnr(ref, gpu8);
-    std::printf("    yaw %.1f: PSNR vs reference  RGBA16F %.2f dB (max diff %d)  RGBA8 %.2f dB (max diff %d)\n", yaw,
-                p16, maxAbsDifference(ref, gpu16), p8, maxAbsDifference(ref, gpu8));
+    const Image gpu10 = renderGpu(renderer, view, s, Framebuffer::Format::RGB10A2);
+    const double p16 = psnr(ref, gpu16), p8 = psnr(ref, gpu8), p10 = psnr(ref, gpu10);
+    std::printf("    yaw %.1f: PSNR vs reference  RGBA16F %.2f dB (max diff %d)  RGB10A2 %.2f dB  RGBA8 %.2f dB (max diff %d)\n",
+                yaw, p16, maxAbsDifference(ref, gpu16), p10, p8, maxAbsDifference(ref, gpu8));
     CHECK(p16 > 40.0);
     CHECK(p8 > 33.0);
+    CHECK(p10 > p8);  // blending precision: 10 bits beats 8 bits
+    CHECK(p16 > p8);
     if (!previousRef.rgb.empty()) CHECK(psnr(previousRef, ref) < 25.0);  // the two views really differ
     previousRef = ref;
     saveForInspection(yaw < 1.0f ? "reference_a.png" : "reference_b.png", ref);
@@ -99,13 +102,21 @@ GPU_TEST_CASE(gpu_sorted_on_gpu_matches_reference) {
   SplatSettings s;
   s.sort = SortMode::GpuRadix;
   const Image ref = renderReference(scene, view, referenceFor(s));
-  const double p32 = psnr(ref, renderGpu(renderer, view, s, Framebuffer::Format::RGBA16F));
+  const Image img32 = renderGpu(renderer, view, s, Framebuffer::Format::RGBA16F);
+  const double p32 = psnr(ref, img32);
+  s.depthKeyBits = 24;
+  const Image img24 = renderGpu(renderer, view, s, Framebuffer::Format::RGBA16F);
+  const double p24 = psnr(ref, img24);
   s.depthKeyBits = 16;
   const double p16 = psnr(ref, renderGpu(renderer, view, s, Framebuffer::Format::RGBA16F));
   s.shDegree = 0;  // without view-dependent color the image must differ (SH is really used)
   const double pNoSh = psnr(ref, renderGpu(renderer, view, s, Framebuffer::Format::RGBA16F));
-  std::printf("    GPU sort: 32-bit keys %.2f dB, 16-bit keys %.2f dB, SH degree 0 %.2f dB\n", p32, p16, pNoSh);
+  std::printf("    GPU sort: 32-bit keys %.2f dB, 24-bit %.2f dB (vs 32-bit %.2f dB), 16-bit %.2f dB, SH degree 0 %.2f dB\n",
+              p32, p24, psnr(img32, img24), p16, pNoSh);
   CHECK(p32 > 40.0);
+  // 24-bit float keys: practically the 32-bit image (measured ~70 dB apart, ~0.1 dB vs reference).
+  CHECK(p24 > p32 - 0.3);
+  CHECK(psnr(img32, img24) > 60.0);
   CHECK(p16 > 35.0);
   CHECK(pNoSh < 35.0);
 }
