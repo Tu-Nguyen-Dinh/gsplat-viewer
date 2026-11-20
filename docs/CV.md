@@ -60,5 +60,5 @@ Linear algebra for graphics · Testing numerical code · CMake · Git
 
 1. README: GIF ở đầu, một câu mô tả, bảng hiệu năng (đã có).
 2. Lịch sử commit theo ngày, message rõ ràng (đã có: 7 commit `feat:` / `perf:` / `docs:`).
-3. Sửa email git (`gamil.com` → `gmail.com`) trước khi push để commit gắn với tài khoản.
+3. ~~Sửa email git (`gamil.com` → `gmail.com`)~~: đã xong (20/11/2026).
 4. Pin repo trên profile; thêm topics: `gaussian-splatting`, `opengl`, `cpp`, `computer-graphics`, `gpu`.
