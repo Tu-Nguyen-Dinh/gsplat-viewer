@@ -4,12 +4,12 @@ Tài liệu lý thuyết chi tiết cho từng ngày: `F:\GraphicsLearning\dayNN
 
 | Ngày | Commit | Nội dung | Kết quả đo |
 |---|---|---|---|
-| 1 | `ed521d2` | CMake + FetchContent, GL loader (X-macro), PLY I/O, camera orbit, point renderer, GPU timer | 300 K điểm: 0,13 ms |
-| 2 | `55c9486` | Tái cấu trúc (core / app / tests), Σ = RSSᵀRᵀ, EWA projection, compute preprocess, indirect draw | GPU khớp CPU 1,2·10⁻⁴ px |
-| 3 | `0506812` | Khóa độ sâu IEEE-754, std::sort và radix sort CPU, renderer tham chiếu CPU, PSNR | 54,4 dB; radix nhanh 5,3× |
-| 4 | `2723027` | Spherical harmonics bậc 3, GPU radix sort (histogram, Blelloch scan, scatter), khóa 16 bit | 1 M khóa: 2,7 ms |
-| 5 | `b263ce8` | `.splat`, loại NaN, tải bất đồng bộ, culling, debug views | 38 test |
-| 6 | `cd423b3` | `--bench`, SH fp16, parallelFor, so với splat-transform | 1 M splat 1080p: 119 FPS; 40,6 dB |
+| 1 | `6793bf2` | CMake + FetchContent, GL loader (X-macro), PLY I/O, camera orbit, point renderer, GPU timer | 300 K điểm: 0,13 ms |
+| 2 | `a308a46` | Tái cấu trúc (core / app / tests), Σ = RSSᵀRᵀ, EWA projection, compute preprocess, indirect draw | GPU khớp CPU 1,2·10⁻⁴ px |
+| 3 | `9286289` | Khóa độ sâu IEEE-754, std::sort và radix sort CPU, renderer tham chiếu CPU, PSNR | 54,4 dB; radix nhanh 5,3× |
+| 4 | `34bef13` | Spherical harmonics bậc 3, GPU radix sort (histogram, Blelloch scan, scatter), khóa 16 bit | 1 M khóa: 2,7 ms |
+| 5 | `3c91947` | `.splat`, loại NaN, tải bất đồng bộ, culling, debug views | 38 test |
+| 6 | `a629365` | `--bench`, SH fp16, parallelFor, so với splat-transform | 1 M splat 1080p: 119 FPS; 40,6 dB |
 | 7 | (commit cuối) | README, MATH.md, GIF, turntable, CI, `.gitattributes` | 42 test |
 
 ## Hướng phát triển tiếp
