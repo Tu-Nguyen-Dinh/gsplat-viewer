@@ -9,6 +9,7 @@ namespace gsv {
 namespace {
 void printUsage() {
   std::printf(
+      "gsplat-viewer " GSV_VERSION "\n\n"
       "Usage:\n"
       "  gsplat_viewer [scene.ply] [options]\n"
       "  gsplat_viewer --gen out.ply [count]\n\n"
@@ -28,7 +29,8 @@ void printUsage() {
       "  --bench              benchmark several configurations (orbit), print a table, exit\n"
       "  --frames N           frames per benchmark configuration / turntable (default 240)\n"
       "  --turntable DIR      save a 360 degree orbit as PNG frames and exit\n"
-      "  --csv FILE           append benchmark results to a CSV file\n");
+      "  --csv FILE           append benchmark results to a CSV file\n"
+      "  --shader-dir DIR     read shaders from DIR (default: <exe dir>/shaders, then the source tree)\n");
 }
 }  // namespace
 
@@ -99,6 +101,10 @@ bool parseOptions(int argc, char** argv, Options& o) {
       const char* v = next();
       if (!v) return printUsage(), false;
       o.benchCsv = v;
+    } else if (a == "--shader-dir") {
+      const char* v = next();
+      if (!v) return printUsage(), false;
+      o.shaderDir = v;
     } else if (a == "--help" || a == "-h") {
       printUsage();
       return false;

@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # Some dependencies declare very old minimum versions; CMake 4 needs this to configure them.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 
-project(gsplat_viewer VERSION 1.0.0 LANGUAGES C CXX)
+project(gsplat_viewer VERSION 1.0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,6 +59,7 @@ add_library(gsplat_core STATIC
   src/core/gaussian_math.cpp
   src/core/image.cpp
   src/core/sorting.cpp
+  src/core/platform.cpp
   src/gl/gl_loader.cpp
   src/gl/shader.cpp
   src/gl/buffer.cpp
@@ -80,6 +81,7 @@ target_compile_definitions(gsplat_core PUBLIC
   GLFW_INCLUDE_NONE
   GLM_ENABLE_EXPERIMENTAL
   # Shaders are read from the source tree so they can be edited and hot-reloaded (F5).
+  GSV_VERSION="${PROJECT_VERSION}"
   GSV_SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
   GSV_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data")
 gsv_warnings(gsplat_core)
@@ -111,6 +113,7 @@ if(GSV_BUILD_TESTS)
     tests/gl_test_context.cpp
     tests/test_math.cpp
     tests/test_scene_io.cpp
+    tests/test_paths.cpp
     tests/test_sorting.cpp
     tests/test_gpu_projection.cpp
     tests/test_gpu_render.cpp

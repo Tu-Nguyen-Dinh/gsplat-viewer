@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/utf8_path.h"
 #include "scene/gaussian_scene.h"
 
 #include <filesystem>

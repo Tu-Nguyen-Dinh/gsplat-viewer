@@ -57,10 +57,6 @@ float readValue(const uint8_t* p, PlyType t) {
 
 }  // namespace
 
-std::filesystem::path pathFromUtf8(const std::string& utf8) {
-  return std::filesystem::path(std::u8string(utf8.begin(), utf8.end()));
-}
-
 void computeRobustBounds(GaussianScene& scene) {
   const size_t n = scene.size();
   if (n == 0) return;

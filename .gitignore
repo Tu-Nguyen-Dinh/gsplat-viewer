@@ -8,3 +8,4 @@ out/
 *.sog
 !assets/.gitkeep
 imgui.ini
+dist/

@@ -1,7 +1,10 @@
 #include "gl/shader.h"
 
+#include "core/utf8_path.h"
+
 #include <glm/gtc/type_ptr.hpp>
 
+#include <filesystem>
 #include <fstream>
 #include <set>
 #include <sstream>
@@ -12,12 +15,33 @@
 
 namespace gsv {
 
-std::string shaderPath(const std::string& file) { return std::string(GSV_SHADER_DIR) + "/" + file; }
+namespace {
+std::string& shaderDirStorage() {
+  static std::string dir = GSV_SHADER_DIR;
+  return dir;
+}
+}  // namespace
+
+const std::string& shaderDirectory() { return shaderDirStorage(); }
+void setShaderDirectory(const std::string& dir) { shaderDirStorage() = dir; }
+std::string shaderPath(const std::string& file) { return shaderDirectory() + "/" + file; }
+
+std::string findShaderDirectory(const std::string& override, const std::string& exeDir, const std::string& marker) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  auto has = [&](const fs::path& dir) { return fs::is_regular_file(dir / marker, ec); };
+  if (!override.empty()) return has(pathFromUtf8(override)) ? override : std::string();
+  if (!exeDir.empty()) {
+    const fs::path packaged = pathFromUtf8(exeDir) / "shaders";
+    if (has(packaged)) return pathToUtf8(packaged);
+  }
+  return has(pathFromUtf8(GSV_SHADER_DIR)) ? std::string(GSV_SHADER_DIR) : std::string();
+}
 
 namespace {
 
 bool readText(const std::string& path, std::string& out) {
-  std::ifstream f(path, std::ios::binary);
+  std::ifstream f(pathFromUtf8(path), std::ios::binary);
   if (!f) return false;
   std::ostringstream ss;
   ss << f.rdbuf();

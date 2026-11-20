@@ -11,7 +11,7 @@ namespace gsv {
 
 // RAII wrapper around a linked GLSL program.
 //
-// Source files are read from GSV_SHADER_DIR and pre-processed on the CPU:
+// Source files are read from shaderDirectory() (see below) and pre-processed on the CPU:
 //   - `#include "file.glsl"` lines are replaced by the file contents (GLSL has no #include),
 //   - `defines` (e.g. "#define WORKGROUP 256\n") are inserted right after #version.
 // Reloading keeps the previous program alive when the new source fails to compile,
@@ -55,6 +55,15 @@ class ShaderProgram {
   std::unordered_map<std::string, GLint> uniformCache_;
 };
 
-std::string shaderPath(const std::string& file);
+// Where shader sources live. Defaults to the build-time GSV_SHADER_DIR (the source tree, so
+// shaders can be edited and hot-reloaded); a packaged build ships them next to the executable.
+const std::string& shaderDirectory();
+void setShaderDirectory(const std::string& dir);
+std::string shaderPath(const std::string& file);  // shaderDirectory() + "/" + file
+
+// Picks the shader directory: the first of `override` (if not empty), `<exeDir>/shaders` and
+// GSV_SHADER_DIR that contains `marker`. Returns an empty string if none does.
+std::string findShaderDirectory(const std::string& override, const std::string& exeDir,
+                                const std::string& marker = "splat.vert");
 
 }  // namespace gsv

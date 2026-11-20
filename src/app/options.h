@@ -28,6 +28,7 @@ struct Options {
   int benchFrames = 240;       // frames per benchmark configuration / turntable frames
   std::string turntableDir;    // --turntable DIR: save an orbit as PNG frames and exit
   std::string benchCsv;        // append results as CSV rows
+  std::string shaderDir;       // --shader-dir: override where shader sources are read from
 };
 
 // Returns false (and prints usage) on invalid arguments.
