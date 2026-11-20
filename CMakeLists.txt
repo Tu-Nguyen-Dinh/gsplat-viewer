@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 # Some dependencies declare very old minimum versions; CMake 4 needs this to configure them.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 
-project(gsplat_viewer VERSION 1.0.1 LANGUAGES C CXX)
+project(gsplat_viewer VERSION 1.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

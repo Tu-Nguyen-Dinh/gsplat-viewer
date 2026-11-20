@@ -43,6 +43,7 @@ class App {
   void drawUi();                             // ui.cpp
   int runBenchmark(const Options& options);  // benchmark.cpp
   int runTurntable(const Options& options);  // benchmark.cpp
+  int runFlythrough(const Options& options); // benchmark.cpp: along the COLMAP cameras
   int runEvaluation(const Options& options);  // evaluate.cpp
 
   // COLMAP cameras of the current scene (scenes trained by tools/capture.ps1).

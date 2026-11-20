@@ -30,6 +30,7 @@ struct Options {
   bool benchmark = false;      // --bench: measure several renderer configurations and exit
   int benchFrames = 240;       // frames per benchmark configuration / turntable frames
   std::string turntableDir;    // --turntable DIR: save an orbit as PNG frames and exit
+  std::string flythroughDir;   // --flythrough DIR: fly along the training cameras, PNG frames, exit
   std::string benchCsv;        // append results as CSV rows
   std::string shaderDir;       // --shader-dir: override where shader sources are read from
   std::string colmapDir;       // --colmap DIR: camera poses (default: found next to the scene file)

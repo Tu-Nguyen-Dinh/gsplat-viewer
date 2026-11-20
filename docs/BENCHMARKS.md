@@ -130,3 +130,25 @@ quaternions within 1e-7); the only difference is deliberate: alpha 255 decodes t
 Version 4 (zstd streams, splat-transform's default) with the vendored zstd 1.5.7 decoder: truck
 42.4 MB, parse 497 ms (v3 with our inflate: 701 ms); decodes to the same values as v3 of the same
 scene (test), render 65.5 dB from the v3 file.
+
+## Regression found before v1.1.0: SH loads and L1 thrashing (21/11/2026)
+
+The release benchmark showed the preprocess pass of SH-degree-3 scenes at 4.7 ms for 1 M splats
+(v1.0: 0.96 ms), in both the compressed and the fp32 paths, while degree-0 scenes had become faster.
+Bisected with worktree builds and runtime shader swaps (same camera as v1.0):
+
+| Build / experiment | preprocess, 1 M splats, SH fp16 |
+|---|---|
+| v1.0.1 (`1d556ef`) | 0.96 ms |
+| Phase 1 (`ab48eeb`) | 0.97 ms |
+| v1.1 viewer work (`b1e9507`) | 1.18 ms |
+| compressed format (`b780e28`) | 4.7 ms |
+| ... v1.0 C++ with the new shaders | 4.7 ms (so: shader side) |
+| ... new shader without the decoder branch / old gaussian.glsl / padded 64-byte records | 4.7 ms each |
+| **SH stored coefficient-major (fix)** | **0.53 ms** (fp32 SH: 0.78 ms, was 3.96 ms in v1.0) |
+
+The SH coefficients were stored per splat (23 words, 92 bytes apart). Every load of a warp touched
+32 different cache lines and the pass only ran fast while L1 kept those lines for the next 22
+loads. The new shader used fewer registers, so more warps ran at once and evicted each other's
+lines. Storing word w of splat k at `[w * count + k]` makes each warp load 128 contiguous bytes:
+no dependence on L1 at all, and faster than v1.0 in both precisions.

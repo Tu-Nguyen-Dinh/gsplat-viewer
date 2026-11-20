@@ -192,4 +192,58 @@ int App::runTurntable(const Options& o) {
   return 0;
 }
 
+namespace {
+// Catmull-Rom spline through p1..p2 (p0 and p3 shape the tangents), t in [0, 1].
+glm::vec3 catmullRom(const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2, const glm::vec3& p3, float t) {
+  const float t2 = t * t, t3 = t2 * t;
+  return 0.5f * (2.0f * p1 + (p2 - p0) * t + (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 +
+                 (3.0f * p1 - p0 - 3.0f * p2 + p3) * t3);
+}
+}  // namespace
+
+int App::runFlythrough(const Options& o) {
+  // A smooth flight along the path the phone took: every k-th training camera (photos are in
+  // video order) is a key frame, positions and view directions follow Catmull-Rom splines through
+  // them. Hand-held jitter averages out between key frames.
+  if (colmap_.images.size() < 2) {
+    std::fprintf(stderr, "--flythrough needs the training cameras (COLMAP model next to the scene)\n");
+    return 1;
+  }
+  const glm::mat3 r(orientation_);
+  std::vector<glm::vec3> eyes, dirs;
+  const size_t step = std::max<size_t>(1, colmap_.images.size() / 16);
+  for (size_t i = 0; i < colmap_.images.size(); i += step) {
+    eyes.push_back(r * glm::vec3(colmap_.images[i].center()));
+    dirs.push_back(glm::normalize(r * glm::vec3(colmap_.images[i].forwardInWorld())));
+  }
+  goToCamera(0);  // field of view of the photos
+  std::error_code ec;
+  std::filesystem::create_directories(pathFromUtf8(o.flythroughDir), ec);
+  Framebuffer target;
+  target.create(o.width, o.height, targetFormat());
+  const int keys = static_cast<int>(eyes.size());
+  auto at = [&](const std::vector<glm::vec3>& v, int k) { return v[static_cast<size_t>(std::clamp(k, 0, keys - 1))]; };
+  for (int f = 0; f < o.benchFrames; ++f) {
+    const float u = static_cast<float>(f) / static_cast<float>(std::max(1, o.benchFrames - 1)) * static_cast<float>(keys - 1);
+    const int k = std::min(static_cast<int>(u), keys - 2);
+    const float t = u - static_cast<float>(k);
+    const glm::vec3 eye = catmullRom(at(eyes, k - 1), at(eyes, k), at(eyes, k + 1), at(eyes, k + 2), t);
+    const glm::vec3 dir = glm::normalize(catmullRom(at(dirs, k - 1), at(dirs, k), at(dirs, k + 1), at(dirs, k + 2), t));
+    camera_.lookAt(eye, eye + dir * std::max(scene_.focusRadius, 1e-3f));
+    target.bind();
+    glClearColor(background_.r, background_.g, background_.b, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    splats_.render(makeRenderView(o.width, o.height), splatSettings_);
+    char name[64];
+    std::snprintf(name, sizeof(name), "frame_%04d.png", f);
+    std::string error;
+    if (!savePng(pathFromUtf8(o.flythroughDir) / name, readFramebuffer(target.id(), o.width, o.height), error)) {
+      std::fprintf(stderr, "Cannot write frame: %s\n", error.c_str());
+      return 1;
+    }
+  }
+  std::printf("Wrote %d frames along %d key cameras to %s\n", o.benchFrames, keys, o.flythroughDir.c_str());
+  return 0;
+}
+
 }  // namespace gsv

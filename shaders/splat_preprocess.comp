@@ -32,7 +32,7 @@ uniform int uCull;
 uniform vec3 uCameraPos;     // in model space (SH directions are defined there)
 uniform int uShDegree;
 uniform uint uRestPerChannel;
-uniform uint uShStride;      // uints per splat in shData (45 for float32, 23 for float16)
+// (uShCount, the plane stride of shData, is declared in spherical_harmonics.glsl)
 uniform vec2 uDepthRange;    // (min, 1 / (max - min)) for 16-bit sort keys
 uniform int uKeyBits;        // 16, 24 or 32
 
@@ -83,7 +83,7 @@ void main() {
     }
 
     vec3 dir = normalize(mean - uCameraPos);
-    vec3 color = evalSphericalHarmonics(uShDegree, dir, dc, i * uShStride, uRestPerChannel);
+    vec3 color = evalSphericalHarmonics(uShDegree, dir, dc, i, uRestPerChannel);
 
     // 32 bytes: center and conic in fp32 (pixel positions need it), color and opacity in fp16.
     projected[i].centerConic = vec4(p.center, p.conic.xy);

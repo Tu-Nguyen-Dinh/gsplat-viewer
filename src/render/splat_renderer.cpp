@@ -96,27 +96,37 @@ void SplatRenderer::upload(const GaussianScene& scene) {
   // Higher SH bands: 45 floats per splat (degree 3) are the largest part of the data.
   // Optionally store them as float16 pairs: half the memory and half the bandwidth
   // the preprocess pass needs to read them every frame.
+  //
+  // Layout: COEFFICIENT-MAJOR (structure of arrays): word w of splat k is at [w * count + k].
+  // One preprocess thread handles one splat, so the 32 threads of a warp reading word w read 32
+  // consecutive uints = one 128-byte transaction. Per-splat records (92 bytes apart) made every
+  // load touch 32 cache lines and relied on L1 to keep them for the next 22 loads; when other
+  // changes raised the occupancy, L1 thrashed and the pass got 4x slower (1.0 -> 4.7 ms, 1 M splats).
   const size_t valuesPerSplat = static_cast<size_t>(restPerChannel_) * 3;
+  const size_t n = scene.size();
   if (valuesPerSplat == 0) {
     shStride_ = 0;
     shRest_.allocate(sizeof(uint32_t), nullptr, GL_STATIC_DRAW);  // SSBOs may not be empty
   } else if (halfSh_) {
-    shStride_ = static_cast<uint32_t>((valuesPerSplat + 1) / 2);
-    std::vector<uint32_t> packed(scene.size() * shStride_, 0u);
-    parallelFor(scene.size(), [&](size_t begin, size_t end) {
+    shStride_ = static_cast<uint32_t>((valuesPerSplat + 1) / 2);  // uint words per splat
+    std::vector<uint32_t> packed(n * shStride_, 0u);
+    parallelFor(n, [&](size_t begin, size_t end) {
       for (size_t k = begin; k < end; ++k) {
         const float* src = scene.restOf(order[k]);
-        uint32_t* dst = packed.data() + k * shStride_;
-        for (size_t v = 0; v < valuesPerSplat; ++v)  // value v goes to half (v & 1) of uint v / 2
-          dst[v / 2] |= static_cast<uint32_t>(floatToHalf(src[v])) << (16 * (v & 1));
+        for (size_t v = 0; v < valuesPerSplat; ++v)  // value v goes to half (v & 1) of word v / 2
+          packed[(v / 2) * n + k] |= static_cast<uint32_t>(floatToHalf(src[v])) << (16 * (v & 1));
       }
     });
     shRest_.allocate(packed.size() * sizeof(uint32_t), packed.data(), GL_STATIC_DRAW);
   } else {
     shStride_ = static_cast<uint32_t>(valuesPerSplat);
-    std::vector<float> rest(scene.size() * valuesPerSplat);
-    for (size_t k = 0; k < scene.size(); ++k)
-      std::copy_n(scene.restOf(order[k]), valuesPerSplat, rest.data() + k * valuesPerSplat);
+    std::vector<float> rest(n * valuesPerSplat);
+    parallelFor(n, [&](size_t begin, size_t end) {
+      for (size_t k = begin; k < end; ++k) {
+        const float* src = scene.restOf(order[k]);
+        for (size_t v = 0; v < valuesPerSplat; ++v) rest[v * n + k] = src[v];
+      }
+    });
     shRest_.allocate(rest.size() * sizeof(float), rest.data(), GL_STATIC_DRAW);
   }
   projected_.allocate(scene.size() * kProjectedSize);
@@ -167,7 +177,7 @@ void SplatRenderer::preprocess(const RenderView& view, const SplatSettings& sett
   preprocess_.set("uCameraPos", cameraInModel);
   preprocess_.set("uShDegree", std::min(settings.shDegree, sceneShDegree_));
   preprocess_.set("uRestPerChannel", static_cast<unsigned>(restPerChannel_));
-  preprocess_.set("uShStride", shStride_);
+  preprocess_.set("uShCount", count_);
   preprocess_.set("uShHalf", halfSh_ ? 1 : 0);
   preprocess_.set("uDepthRange", depthRange_);
   const int keyBits = settings.depthKeyBits == 16 ? 16 : settings.depthKeyBits == 24 ? 24 : 32;

@@ -32,6 +32,7 @@ void printUsage() {
       "  --bench              benchmark several configurations (orbit), print a table, exit\n"
       "  --frames N           frames per benchmark configuration / turntable (default 240)\n"
       "  --turntable DIR      save a 360 degree orbit as PNG frames and exit\n"
+      "  --flythrough DIR     fly along the training cameras (COLMAP), PNG frames (--frames N), exit\n"
       "  --csv FILE           append benchmark results to a CSV file\n"
       "  --shader-dir DIR     read shaders from DIR (default: <exe dir>/shaders, then the source tree)\n"
       "  --colmap DIR         COLMAP model with the training cameras (default: <scene dir>/dataset/sparse/0)\n"
@@ -121,6 +122,10 @@ bool parseOptions(int argc, char** argv, Options& o) {
       const char* v = next();
       if (!v) return printUsage(), false;
       o.saveEdited = v;
+    } else if (a == "--flythrough") {
+      const char* v = next();
+      if (!v) return printUsage(), false;
+      o.flythroughDir = v;
     } else if (a == "--turntable") {
       const char* v = next();
       if (!v) return printUsage(), false;

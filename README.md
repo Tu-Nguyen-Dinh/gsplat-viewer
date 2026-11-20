@@ -9,12 +9,30 @@ EWA projection, view-dependent color with spherical harmonics, and a stable radi
 entirely in compute shaders. Every stage is unit-tested against a CPU reference and validated
 against an independent renderer.
 
+![A room filmed with a phone, reconstructed with COLMAP + Brush and rendered by gsplat-viewer along the camera path](docs/images/v11_phone_capture.gif)
+
+*A desk filmed with a phone (848×480 video), reconstructed with COLMAP + Brush, rendered by
+gsplat-viewer along the path of the phone. 32-second demo video: see the
+[latest release](https://github.com/Tu-Nguyen-Dinh/gsplat-viewer/releases/latest).*
+
 ![Turntable of the demo scene: 300 K Gaussians with degree-3 spherical harmonics](docs/images/demo.gif)
 
-**1 M Gaussians at 1920×1080: 8.4 ms per frame (119 FPS) on an RTX 3060** · 45 tests · 40.6 dB PSNR vs PlayCanvas splat-transform
+**1 M Gaussians at 1920×1080: 8.7 ms per frame (115 FPS) on an RTX 3060** · phone video → 3D scene at 30.3 dB · 89 tests · 40.6 dB vs PlayCanvas splat-transform
 
 ## Highlights
 
+- **From a phone video to a 3D scene** — `tools/capture.ps1 video.mp4` picks sharp frames
+  (variance of the Laplacian), runs COLMAP and Brush, then opens the result on the first training
+  camera. `--eval` renders every held-out photo with its exact pose and intrinsics: a room filmed
+  with a phone scores 30.3 dB PSNR, 0.28 dB from what the trainer itself renders
+  ([capture guide](docs/CAPTURE.md)).
+- **Compact GPU format** — 24 bytes per splat (16-bit positions in Morton-ordered chunks, fp16
+  scale/opacity/color, 32-bit smallest-three quaternion); a 2.5 M splat scene fits in 155 MB of GPU
+  memory instead of 339 MB, images 56–60 dB from full precision.
+- **Viewer** — opens on the dense subject of any scene (radial density profile), orbit and fly
+  cameras, 16-bit float blending (+0.35 dB over the 8-bit window on real scenes), box/sphere
+  editing with undo, PLY export, `.ply` / `.splat` / `.spz` v2–4 input (gzip decoder written from
+  the RFCs, zstd vendored).
 - **EWA splatting on the GPU** — 3D covariance from scale + quaternion, perspective Jacobian with
   clamping, eigen-decomposition into oriented screen-space ellipses ([math](docs/MATH.md)).
 - **GPU radix sort** — stable LSD sort (4-bit digits, per-block histograms, two-level Blelloch scan,
@@ -42,9 +60,9 @@ flowchart LR
 
 | Stage | 1 M splats, 1080p | Bound by |
 |---|---:|---|
-| Preprocess (projection + SH) | 1.00 ms | memory bandwidth |
-| GPU radix sort (32-bit keys) | 2.47 ms | shared-memory ranking |
-| Draw (132 M fragments, ~57 layers/pixel) | 4.83 ms | fill rate |
+| Preprocess (decode + projection + SH) | 0.53 ms | memory bandwidth |
+| GPU radix sort (24-bit keys) | 1.78 ms | shared-memory ranking |
+| Draw (132 M fragments, ~57 layers/pixel, fp16 blending) | 6.21 ms | blend rate |
 
 ## Quick start (Windows)
 
@@ -110,22 +128,29 @@ PSNR from 30.3 to 14.8 dB), so `--eval` is the way to check an edit.
 
 ## Performance
 
-RTX 3060, i5-12400F, 1920×1080 offscreen, average of a 240-frame orbit after warm-up
+RTX 3060, i5-12400F, 1920×1080 offscreen, 240-frame orbit after warm-up, frame time = median
+interval; default settings: compressed splats, 24-bit sort keys, 16-bit float blending
 ([full table](docs/BENCHMARKS.md), [raw CSV](docs/benchmarks.csv)).
 
-| Splats | Preprocess | Sort | Draw | Frame | FPS |
-|---:|---:|---:|---:|---:|---:|
-| 300 K | 0.35 ms | 0.89 ms | 1.42 ms | 2.75 ms | 364 |
-| 1 M | 1.00 ms | 2.47 ms | 4.83 ms | 8.39 ms | 119 |
-| 3 M | 2.83 ms | 7.06 ms | 14.13 ms | 24.10 ms | 41 |
+| Scene | Splats | Preprocess | Sort | Draw | Frame | FPS | GPU memory |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| demo (SH degree 3) | 300 K | 0.17 ms | 0.68 ms | 1.82 ms | 2.77 ms | 361 | 45 MB |
+| demo (SH degree 3) | 1 M | 0.53 ms | 1.78 ms | 6.21 ms | 8.73 ms | 115 | 149 MB |
+| demo (SH degree 3) | 3 M | 1.47 ms | 5.27 ms | 18.05 ms | 24.91 ms | 40 | 447 MB |
+| truck (Tanks and Temples) | 2.54 M | 0.49 ms | 4.13 ms | 6.17 ms | 10.97 ms | 91 | 155 MB |
 
-| Optimization (1 M splats) | Before → after |
+| Optimization | Before → after |
 |---|---|
-| GPU radix sort instead of CPU radix | 13.8 ms → 2.5 ms |
-| SH stored as float16 | 4.09 ms → 1.00 ms preprocess |
-| 16-bit depth keys | 2.47 ms → 1.25 ms sort |
-| Oriented quads instead of squares | 293 M → 132 M fragments (draw 1.18× faster) |
+| GPU radix sort instead of CPU radix (1 M) | 13.8 ms → 2.5 ms |
+| SH coefficient-major (coalesced loads), float16 (1 M) | 4.09 ms → 0.53 ms preprocess |
+| 24-bit float depth keys, same image as 32-bit (truck) | 5.5 ms → 4.1 ms sort |
+| Compressed splats, 24 B instead of 64 (truck) | 339 MB → 155 MB, preprocess 0.80 → 0.49 ms |
+| Opacity-aware quad size (truck) | 245 M → 180 M fragments, same image |
+| Oriented quads instead of squares (1 M) | 293 M → 132 M fragments (draw 1.18× faster) |
 | Parallel scene precompute (12 threads) | 160 ms → 26 ms |
+
+The 16-bit float blend target costs ~1.3 ms of draw time at 1 M splats (8-bit: `--blend rgba8`)
+and buys 0.35 dB on real scenes; see [BENCHMARKS](docs/BENCHMARKS.md) for every trade-off.
 
 ## Validation
 
@@ -135,7 +160,7 @@ RTX 3060, i5-12400F, 1920×1080 offscreen, average of a 240-frame orbit after wa
 | GPU image vs CPU reference renderer | 54.4 dB (RGBA16F), 51.6 dB (RGBA8) |
 | Unsorted image vs reference (the test must fail) | 22–24 dB |
 | GPU radix sort vs `std::stable_sort` | identical, sizes 1 … 600 K, duplicates, 16-bit |
-| vs PlayCanvas splat-transform | 40.6 dB ([script](tools/compare_with_splat_transform.ps1)) |
+| vs PlayCanvas splat-transform | 40.6 dB on the demo, 45.0 dB on an edited scene saved as PLY ([script](tools/compare_with_splat_transform.ps1)) |
 
 ![gsplat-viewer, splat-transform, difference ×8](docs/images/day6_splat_transform_compare.png)
 

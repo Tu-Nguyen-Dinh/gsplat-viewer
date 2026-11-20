@@ -133,7 +133,7 @@ int App::run(const Options& o) {
   else setScene(makeDemoScene());
 
   colmapOverride_ = o.colmapDir;
-  if (o.benchmark || !o.turntableDir.empty() || o.evaluate) {
+  if (o.benchmark || !o.turntableDir.empty() || !o.flythroughDir.empty() || o.evaluate) {
     if (!pendingLoad_.empty()) {
       loadSceneFile(pendingLoad_);
       pendingLoad_.clear();
@@ -146,6 +146,7 @@ int App::run(const Options& o) {
     const int code = scene_.empty()  ? 1
                      : o.evaluate    ? runEvaluation(o)
                      : o.benchmark   ? runBenchmark(o)
+                     : !o.flythroughDir.empty() ? runFlythrough(o)
                                      : runTurntable(o);
     shutdown();
     return code;
