@@ -5,6 +5,7 @@
 #include "gl/gpu_timer.h"
 #include "render/point_renderer.h"
 #include "render/splat_renderer.h"
+#include "scene/colmap_io.h"
 #include "scene/gaussian_scene.h"
 #include "scene/scene_io.h"
 
@@ -40,6 +41,12 @@ class App {
   void drawUi();                             // ui.cpp
   int runBenchmark(const Options& options);  // benchmark.cpp
   int runTurntable(const Options& options);  // benchmark.cpp
+  int runEvaluation(const Options& options);  // evaluate.cpp
+
+  // COLMAP cameras of the current scene (scenes trained by tools/capture.ps1).
+  void loadColmapFor(const std::string& sceneUtf8Path, const std::string& explicitDir);
+  void goToCamera(int index);  // view the scene from a training camera
+  void drawCameras();          // ui.cpp: frustums on top of the scene
 
   static void onDrop(GLFWwindow* window, int count, const char** paths);
   static void onScroll(GLFWwindow* window, double dx, double dy);
@@ -60,6 +67,14 @@ class App {
   float pointSize_ = 2.0f;
   float minOpacity_ = 0.05f;
   glm::vec3 background_{0.07f, 0.08f, 0.1f};
+
+  ColmapModel colmap_;
+  std::string colmapDir_;           // UTF-8; empty when the scene has no cameras
+  std::string colmapOverride_;      // --colmap
+  glm::mat4 orientation_{1.0f};     // rotates the cameras' average "up" onto +Y
+  bool hasOrientation_ = false;
+  bool showCameras_ = true;
+  int cameraIndex_ = -1;
 
   float distanceScale_ = 1.0f;  // multiplier on the framing distance (--distance)
   bool fixedCamera_ = false;    // --camera-pos / --camera-target

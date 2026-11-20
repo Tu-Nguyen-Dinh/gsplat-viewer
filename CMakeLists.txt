@@ -60,6 +60,7 @@ add_library(gsplat_core STATIC
   src/core/image.cpp
   src/core/sorting.cpp
   src/core/platform.cpp
+  src/core/frame_select.cpp
   src/gl/gl_loader.cpp
   src/gl/shader.cpp
   src/gl/buffer.cpp
@@ -68,6 +69,7 @@ add_library(gsplat_core STATIC
   src/scene/ply_io.cpp
   src/scene/demo_scene.cpp
   src/scene/scene_io.cpp
+  src/scene/colmap_io.cpp
   src/render/point_renderer.cpp
   src/render/splat_renderer.cpp
   src/render/reference_renderer.cpp
@@ -77,6 +79,9 @@ add_library(gsplat_core STATIC
 target_include_directories(gsplat_core PUBLIC src third_party/khronos PRIVATE third_party/stb)
 find_package(Threads REQUIRED)  # std::thread / std::async (needs -pthread on Linux)
 target_link_libraries(gsplat_core PUBLIC glfw glm::glm Threads::Threads)
+if(WIN32)
+  target_link_libraries(gsplat_core PUBLIC shell32)  # CommandLineToArgvW (UTF-8 command line)
+endif()
 target_compile_definitions(gsplat_core PUBLIC
   GLFW_INCLUDE_NONE
   GLM_ENABLE_EXPERIMENTAL
@@ -94,13 +99,24 @@ add_executable(gsplat_viewer
   src/app/app.cpp
   src/app/ui.cpp
   src/app/options.cpp
-  src/app/benchmark.cpp)
+  src/app/benchmark.cpp
+  src/app/evaluate.cpp)
 target_link_libraries(gsplat_viewer PRIVATE gsplat_core imgui)
 gsv_warnings(gsplat_viewer)
 
 if(MINGW)
   # Single self-contained .exe: no libstdc++/libgcc DLLs needed at runtime.
   target_link_options(gsplat_viewer PRIVATE -static)
+endif()
+
+# ---------------------------------------------------------------------------
+# Capture tools (phone video -> frames for Structure-from-Motion)
+# ---------------------------------------------------------------------------
+add_executable(gsplat_prep src/tools/prep_main.cpp)
+target_link_libraries(gsplat_prep PRIVATE gsplat_core)
+gsv_warnings(gsplat_prep)
+if(MINGW)
+  target_link_options(gsplat_prep PRIVATE -static)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -114,6 +130,9 @@ if(GSV_BUILD_TESTS)
     tests/test_math.cpp
     tests/test_scene_io.cpp
     tests/test_paths.cpp
+    tests/test_frame_select.cpp
+    tests/test_colmap.cpp
+    tests/test_image_metrics.cpp
     tests/test_sorting.cpp
     tests/test_gpu_projection.cpp
     tests/test_gpu_render.cpp

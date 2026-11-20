@@ -147,8 +147,8 @@ int App::runBenchmark(const Options& o) {
   glDeleteQueries(1, &samplesQuery);
 
   if (!o.benchCsv.empty()) {
-    const bool exists = std::ifstream(o.benchCsv).good();
-    std::ofstream out(o.benchCsv, std::ios::app);
+    const bool exists = std::ifstream(pathFromUtf8(o.benchCsv)).good();
+    std::ofstream out(pathFromUtf8(o.benchCsv), std::ios::app);
     out << (exists ? csv.substr(csv.find('\n') + 1) : csv);  // header only once
     std::printf("Appended results to %s\n", o.benchCsv.c_str());
   }

@@ -23,7 +23,7 @@ struct Projection {
 };
 
 // EWA splatting: Sigma' = J W Sigma W^T J^T  (see gaussian_math.cpp for the derivation).
-Projection projectGaussian(vec3 mean, mat3 cov, mat4 view, vec2 viewport, vec2 focal, vec2 tanHalfFov,
+Projection projectGaussian(vec3 mean, mat3 cov, mat4 view, vec2 viewport, vec2 focal, vec2 principal, vec2 tanHalfFov,
                            float nearPlane, float splatScale, bool cullOutsideViewport) {
     Projection o;
     o.visible = false;
@@ -57,7 +57,7 @@ Projection projectGaussian(vec3 mean, mat3 cov, mat4 view, vec2 viewport, vec2 f
     vec2 v1 = abs(b) > 1e-6 ? normalize(vec2(b, lambda1 - a)) : (a >= c ? vec2(1, 0) : vec2(0, 1));
     vec2 v2 = vec2(-v1.y, v1.x);
 
-    o.center = vec2(focal.x * t.x / z, focal.y * t.y / z) + 0.5 * viewport;
+    o.center = vec2(focal.x * t.x / z, focal.y * t.y / z) + principal;
     o.depth = z;
     o.conic = vec3(c, -b, a) / det;
     o.radius = ceil(kSigmaExtent * sqrt(lambda1));

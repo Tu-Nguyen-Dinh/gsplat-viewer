@@ -133,6 +133,7 @@ void SplatRenderer::preprocess(const RenderView& view, const SplatSettings& sett
   preprocess_.set("uView", modelView);
   preprocess_.set("uViewport", glm::vec2(view.viewport));
   preprocess_.set("uFocal", view.focalPixels());
+  preprocess_.set("uPrincipal", view.principalPixels());
   preprocess_.set("uTanHalfFov", view.tanHalfFov());
   preprocess_.set("uNear", view.nearPlane);
   preprocess_.set("uSplatScale", settings.splatScale);

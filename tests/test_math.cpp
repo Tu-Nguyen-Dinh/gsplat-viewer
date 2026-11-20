@@ -239,3 +239,19 @@ TEST_CASE(parallel_for_matches_serial_and_is_faster) {
   for (size_t i = 0; i < n && same; ++i) same = serial[i].xx == parallel[i].xx && serial[i].yz == parallel[i].yz;
   CHECK(same);  // bit-identical: each element is computed by exactly the same code
 }
+
+TEST_CASE(projection_principal_point_shifts_center) {
+  // Moving the principal point moves every projected center by exactly the same offset and leaves
+  // the shape (conic) unchanged: it is a pure translation in pixel space.
+  ProjectionParams cam = testCamera();
+  cam.view = glm::lookAt(glm::vec3(0.5f, 0.2f, 3.0f), glm::vec3(0.0f), glm::vec3(0, 1, 0));
+  const glm::vec3 mean(0.3f, -0.2f, 0.1f);
+  const Cov3 cov = covarianceFromScaleRotation({0.1f, 0.05f, 0.02f}, {0.8f, 0.1f, 0.4f, 0.2f});
+  const ProjectedGaussian a = projectGaussian(mean, cov, cam);
+  cam.principal = 0.5f * cam.viewport + glm::vec2(12.0f, -7.0f);
+  const ProjectedGaussian b = projectGaussian(mean, cov, cam);
+  REQUIRE(a.visible && b.visible);
+  CHECK_NEAR(b.center.x - a.center.x, 12.0, 1e-4);
+  CHECK_NEAR(b.center.y - a.center.y, -7.0, 1e-4);
+  CHECK(a.conic == b.conic);
+}

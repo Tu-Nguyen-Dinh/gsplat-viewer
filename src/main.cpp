@@ -9,8 +9,9 @@
 #include <cstdio>
 
 int main(int argc, char** argv) {
+  gsv::Utf8Argv args(argc, argv);  // UTF-8 even for non-ASCII paths on Windows
   gsv::Options options;
-  if (!gsv::parseOptions(argc, argv, options)) return 1;
+  if (!gsv::parseOptions(args.argc(), args.argv(), options)) return 1;
 
   if (!options.generateTo.empty()) {
     std::string error;

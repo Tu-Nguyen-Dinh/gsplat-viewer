@@ -8,11 +8,15 @@
 #include <GLFW/glfw3.h>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/quaternion.hpp>  // glm::rotation(from, to)
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <filesystem>
 #include <cstdio>
 
 namespace gsv {
@@ -122,7 +126,8 @@ int App::run(const Options& o) {
   if (!o.scene.empty()) pendingLoad_ = o.scene;
   else setScene(makeDemoScene());
 
-  if (o.benchmark || !o.turntableDir.empty()) {
+  colmapOverride_ = o.colmapDir;
+  if (o.benchmark || !o.turntableDir.empty() || o.evaluate) {
     if (!pendingLoad_.empty()) {
       loadSceneFile(pendingLoad_);
       pendingLoad_.clear();
@@ -132,7 +137,10 @@ int App::run(const Options& o) {
       }
       if (!status_.empty()) std::printf("%s\n", status_.c_str());
     }
-    const int code = scene_.empty() ? 1 : o.benchmark ? runBenchmark(o) : runTurntable(o);
+    const int code = scene_.empty()  ? 1
+                     : o.evaluate    ? runEvaluation(o)
+                     : o.benchmark   ? runBenchmark(o)
+                                     : runTurntable(o);
     shutdown();
     return code;
   }
@@ -206,6 +214,7 @@ int App::run(const Options& o) {
 // --------------------------------------------------------------------------------------
 
 glm::mat4 App::modelMatrix() const {
+  if (hasOrientation_) return orientation_;  // known cameras: their average "up" becomes +Y
   return flipY_ ? glm::rotate(glm::mat4(1.0f), glm::pi<float>(), glm::vec3(1, 0, 0)) : glm::mat4(1.0f);
 }
 
@@ -276,10 +285,14 @@ void App::pollLoading() {
     status_ = "Load failed: " + r.error;
     return;
   }
+  loadColmapFor(loadingName_, colmapOverride_);  // before setScene: framing uses the orientation
   const auto t0 = std::chrono::steady_clock::now();
   setScene(std::move(r.scene));  // GPU upload: must run on the thread that owns the GL context
   const double uploadMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   loadMs_ = r.milliseconds + uploadMs;
+  // A captured scene is only well reconstructed from where the phone was: framing its bounds from
+  // outside shows the floaters around it, so start at the first training camera (F frames all).
+  if (!colmap_.images.empty() && !fixedCamera_) goToCamera(0);
   char buf[256];
   std::snprintf(buf, sizeof(buf), "Loaded %zu splats (parse %.0f ms, upload %.0f ms)%s", scene_.size(),
                 r.milliseconds, uploadMs, r.removedInvalid ? ", removed invalid splats: " : "");
@@ -301,6 +314,47 @@ void App::frameScene() {
   camera_.frameBounds(lo, hi);
   camera_.distance *= distanceScale_;
   if (fixedCamera_) camera_.lookAt(fixedEye_, fixedTarget_);  // explicit camera from the command line
+}
+
+void App::loadColmapFor(const std::string& sceneUtf8Path, const std::string& explicitDir) {
+  colmap_ = {};
+  colmapDir_.clear();
+  hasOrientation_ = false;
+  cameraIndex_ = -1;
+  if (sceneUtf8Path.empty() && explicitDir.empty()) return;  // e.g. the demo scene
+  const std::filesystem::path dir =
+      explicitDir.empty() ? findColmapModelFor(pathFromUtf8(sceneUtf8Path)) : pathFromUtf8(explicitDir);
+  if (dir.empty()) return;  // a scene without cameras: keep --flip-y behaviour
+  std::string error;
+  if (!loadColmapModel(dir, colmap_, error) || colmap_.images.empty()) {
+    std::fprintf(stderr, "COLMAP model %s ignored: %s\n", pathToUtf8(dir).c_str(), error.c_str());
+    colmap_ = {};
+    return;
+  }
+  colmapDir_ = pathToUtf8(dir);
+  // COLMAP's world axes are arbitrary; people hold the phone upright, so rotate the average camera
+  // up vector onto +Y. glm::rotation handles the antiparallel case (up = -Y, the usual result).
+  orientation_ = glm::mat4_cast(glm::rotation(averageCameraUp(colmap_), glm::vec3(0.0f, 1.0f, 0.0f)));
+  hasOrientation_ = true;
+}
+
+void App::goToCamera(int index) {
+  if (colmap_.images.empty()) return;
+  const int n = static_cast<int>(colmap_.images.size());
+  cameraIndex_ = ((index % n) + n) % n;
+  const ColmapImage& im = colmap_.images[static_cast<size_t>(cameraIndex_)];
+  const glm::mat3 r(orientation_);
+  const glm::vec3 eye = r * glm::vec3(im.center());
+  const glm::vec3 forward = glm::normalize(r * glm::vec3(im.forwardInWorld()));
+  // Orbit around a point in front of the camera, at the depth of the scene center.
+  const glm::vec3 sceneCenter = glm::vec3(modelMatrix() * glm::vec4(0.5f * (scene_.boundsMin + scene_.boundsMax), 1.0f));
+  const float depth = std::max(glm::dot(sceneCenter - eye, forward), 0.1f * glm::length(scene_.boundsMax - scene_.boundsMin));
+  camera_.lookAt(eye, eye + forward * depth);
+  if (const ColmapCamera* cam = colmap_.camera(im.cameraId)) {
+    const glm::dvec4 k = cam->pinhole();
+    if (k.y > 0.0) camera_.fovY = static_cast<float>(2.0 * std::atan(0.5 * cam->height / k.y));  // match the photo
+  }
+  status_ = "Camera " + std::to_string(cameraIndex_ + 1) + " / " + std::to_string(n) + ": " + im.name;
 }
 
 void App::reloadShaders() {
@@ -365,6 +419,7 @@ void App::handleInput(float dt, int fbHeight) {
   if (pressed(GLFW_KEY_F5)) reloadShaders();
   if (pressed(GLFW_KEY_F)) frameScene();
   if (pressed(GLFW_KEY_TAB)) mode_ = mode_ == RenderMode::Splats ? RenderMode::Points : RenderMode::Splats;
+  if (pressed(GLFW_KEY_C)) goToCamera(cameraIndex_ + (down(GLFW_KEY_LEFT_SHIFT) ? -1 : 1));  // training cameras
 }
 
 }  // namespace gsv

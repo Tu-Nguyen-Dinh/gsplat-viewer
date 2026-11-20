@@ -71,7 +71,8 @@ ProjectedGaussian projectGaussian(const glm::vec3& mean, const Cov3& cov, const 
                                      : (a >= c ? glm::vec2(1, 0) : glm::vec2(0, 1));
   const glm::vec2 v2(-v1.y, v1.x);
 
-  out.center = glm::vec2(p.focal.x * t.x / z, p.focal.y * t.y / z) + 0.5f * p.viewport;
+  const glm::vec2 principal = p.principal.x >= 0.0f ? p.principal : 0.5f * p.viewport;
+  out.center = glm::vec2(p.focal.x * t.x / z, p.focal.y * t.y / z) + principal;
   out.depth = z;
   out.conic = glm::vec3(c, -b, a) / det;
   out.radius = std::ceil(kSigmaExtent * std::sqrt(lambda1));

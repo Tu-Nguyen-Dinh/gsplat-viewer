@@ -11,3 +11,6 @@ imgui.ini
 dist/
 !tests/data/*.splat
 !tests/data/*.ply
+scenes/
+# Brush GPU kernel autotune cache
+target/

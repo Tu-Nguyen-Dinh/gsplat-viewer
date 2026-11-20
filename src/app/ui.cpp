@@ -33,6 +33,7 @@ void App::drawUi() {
                        loadingName_.c_str(), t - loadingStart_);
   }
   if (ImGui::Button("Demo scene")) {
+    loadColmapFor("", "");  // the demo has no cameras
     setScene(makeDemoScene());
     status_ = "Demo scene";
   }
@@ -86,7 +87,9 @@ void App::drawUi() {
     ImGui::SliderFloat("Min opacity", &minOpacity_, 0.0f, 1.0f);
   }
   ImGui::ColorEdit3("Background", &background_.x);
+  ImGui::BeginDisabled(hasOrientation_);  // with cameras the orientation comes from them
   if (ImGui::Checkbox("Flip Y (INRIA / COLMAP scenes)", &flipY_)) frameScene();
+  ImGui::EndDisabled();
   if (ImGui::Checkbox("VSync", &vsync_)) glfwSwapInterval(vsync_ ? 1 : 0);
 
   // ---- Camera --------------------------------------------------------------
@@ -96,12 +99,72 @@ void App::drawUi() {
   if (ImGui::Button("Frame scene (F)")) frameScene();
   ImGui::TextDisabled("LMB orbit | RMB/MMB pan | wheel zoom\nWASD/QE move, Shift = faster");
 
+  // ---- Training cameras (COLMAP) -------------------------------------------------
+  if (!colmap_.images.empty()) {
+    ImGui::SeparatorText("Training cameras");
+    ImGui::Text("%zu photos, %zu camera model(s)", colmap_.images.size(), colmap_.cameras.size());
+    ImGui::TextDisabled("%s", colmapDir_.c_str());
+    ImGui::Checkbox("Show frustums", &showCameras_);
+    if (ImGui::Button("< Prev")) goToCamera(cameraIndex_ - 1);
+    ImGui::SameLine();
+    if (ImGui::Button("Next (C) >")) goToCamera(cameraIndex_ + 1);
+    if (cameraIndex_ >= 0) {
+      ImGui::SameLine();
+      ImGui::Text("%s", colmap_.images[static_cast<size_t>(cameraIndex_)].name.c_str());
+    }
+  }
+
   // ---- Dev -----------------------------------------------------------------
   ImGui::SeparatorText("Dev");
   if (ImGui::Button("Reload shaders (F5)")) reloadShaders();
   if (!shaderLog_.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "%s", shaderLog_.c_str());
   ImGui::TextDisabled("%s", glRenderer_.c_str());
   ImGui::End();
+
+  if (showCameras_) drawCameras();
+}
+
+// Draws each training camera as a small pyramid (frustum) with ImGui's background draw list:
+// projected on the CPU, so no extra GL pipeline is needed for a few hundred line segments.
+void App::drawCameras() {
+  if (colmap_.images.empty()) return;
+  const ImVec2 size = ImGui::GetIO().DisplaySize;
+  if (size.x <= 0 || size.y <= 0) return;
+  const glm::mat4 viewProj = camera_.projection(size.x / size.y) * camera_.view() * modelMatrix();
+  auto toScreen = [&](const glm::vec3& world, ImVec2& out) {
+    const glm::vec4 c = viewProj * glm::vec4(world, 1.0f);
+    if (c.w <= 1e-6f) return false;  // behind the eye
+    out = ImVec2((c.x / c.w * 0.5f + 0.5f) * size.x, (0.5f - c.y / c.w * 0.5f) * size.y);
+    return true;
+  };
+
+  ImDrawList* dl = ImGui::GetBackgroundDrawList();
+  const float depth = 0.03f * glm::length(scene_.boundsMax - scene_.boundsMin);  // pyramid size
+  for (size_t i = 0; i < colmap_.images.size(); ++i) {
+    const ColmapImage& im = colmap_.images[i];
+    const ColmapCamera* cam = colmap_.camera(im.cameraId);
+    if (!cam) continue;
+    const glm::dvec4 k = cam->pinhole();  // fx, fy, cx, cy
+    const glm::dmat3 camToWorld = glm::transpose(im.worldToCameraRotation());
+    const glm::dvec3 c = im.center();
+    // Image corners on the plane z = depth in camera space (COLMAP: x right, y down, z forward).
+    const double u[4] = {0, double(cam->width), double(cam->width), 0}, v[4] = {0, 0, double(cam->height), double(cam->height)};
+    ImVec2 apex, corner[4];
+    bool ok = toScreen(glm::vec3(c), apex);
+    for (int j = 0; j < 4 && ok; ++j) {
+      const glm::dvec3 p((u[j] - k.z) / k.x * depth, (v[j] - k.w) / k.y * depth, depth);
+      ok = toScreen(glm::vec3(c + camToWorld * p), corner[j]);
+    }
+    if (!ok) continue;
+    const bool current = static_cast<int>(i) == cameraIndex_;
+    const ImU32 color = current ? IM_COL32(255, 210, 60, 255) : IM_COL32(90, 200, 255, 160);
+    const float width = current ? 2.5f : 1.0f;
+    for (int j = 0; j < 4; ++j) {
+      dl->AddLine(apex, corner[j], color, width);
+      dl->AddLine(corner[j], corner[(j + 1) % 4], color, width);
+    }
+    dl->AddLine(corner[0], corner[1], current ? color : IM_COL32(255, 120, 90, 200), width * 2.0f);  // image top
+  }
 }
 
 }  // namespace gsv

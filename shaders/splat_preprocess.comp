@@ -20,6 +20,7 @@ uniform uint uCount;
 uniform mat4 uView;          // view * model
 uniform vec2 uViewport;
 uniform vec2 uFocal;
+uniform vec2 uPrincipal;  // principal point in pixels
 uniform vec2 uTanHalfFov;
 uniform float uNear;
 uniform float uSplatScale;
@@ -47,7 +48,7 @@ void main() {
 
     GpuSplat s = splats[i];
     Projection p = projectGaussian(s.positionOpacity.xyz, unpackCovariance(s.cov0, s.cov1), uView, uViewport,
-                                   uFocal, uTanHalfFov, uNear, uSplatScale, uCull != 0);
+                                   uFocal, uPrincipal, uTanHalfFov, uNear, uSplatScale, uCull != 0);
     if (!p.visible || s.positionOpacity.w < 1.0 / 255.0) {
         projected[i].centerDepthRadius = vec4(0.0);
         return;

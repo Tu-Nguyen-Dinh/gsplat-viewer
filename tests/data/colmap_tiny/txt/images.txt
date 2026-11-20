@@ -1,0 +1,12 @@
+# Image list with two lines of data per image:
+#   IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, NAME
+#   POINTS2D[] as (X, Y, POINT3D_ID)
+# a: at (0,0,-5) looking down +Z at the origin
+1 1 0 0 0 0 0 5 1 a.jpg
+
+# b: at (-5,0,0) looking down +X at the origin (rotated -90 degrees about Y)
+2 0.70710678118654757 0 -0.70710678118654757 0 0 0 5 1 b.jpg
+100.5 200.25 -1
+# c: at (1,2,-5), same orientation as a, other camera
+3 1 0 0 0 -1 -2 5 2 c.jpg
+

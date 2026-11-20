@@ -30,7 +30,11 @@ void printUsage() {
       "  --frames N           frames per benchmark configuration / turntable (default 240)\n"
       "  --turntable DIR      save a 360 degree orbit as PNG frames and exit\n"
       "  --csv FILE           append benchmark results to a CSV file\n"
-      "  --shader-dir DIR     read shaders from DIR (default: <exe dir>/shaders, then the source tree)\n");
+      "  --shader-dir DIR     read shaders from DIR (default: <exe dir>/shaders, then the source tree)\n"
+      "  --colmap DIR         COLMAP model with the training cameras (default: <scene dir>/dataset/sparse/0)\n"
+      "  --eval               render every held-out training view, compare with the photo (PSNR, SSIM)\n"
+      "                       and with Brush's render; writes <scene dir>/eval/ and exits\n"
+      "  --eval-every N       held-out split if Brush's eval folder is missing (default 8)\n");
 }
 }  // namespace
 
@@ -105,6 +109,16 @@ bool parseOptions(int argc, char** argv, Options& o) {
       const char* v = next();
       if (!v) return printUsage(), false;
       o.shaderDir = v;
+    } else if (a == "--colmap") {
+      const char* v = next();
+      if (!v) return printUsage(), false;
+      o.colmapDir = v;
+    } else if (a == "--eval") {
+      o.evaluate = true;
+    } else if (a == "--eval-every") {
+      const char* v = next();
+      if (!v) return printUsage(), false;
+      o.evalEvery = std::max(2, std::atoi(v));
     } else if (a == "--help" || a == "-h") {
       printUsage();
       return false;

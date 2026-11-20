@@ -29,6 +29,9 @@ struct Options {
   std::string turntableDir;    // --turntable DIR: save an orbit as PNG frames and exit
   std::string benchCsv;        // append results as CSV rows
   std::string shaderDir;       // --shader-dir: override where shader sources are read from
+  std::string colmapDir;       // --colmap DIR: camera poses (default: found next to the scene file)
+  bool evaluate = false;       // --eval: render the held-out views, PSNR / SSIM vs the photos, exit
+  int evalEvery = 8;           // --eval-every N: held-out split when Brush's eval folder is missing
 };
 
 // Returns false (and prints usage) on invalid arguments.

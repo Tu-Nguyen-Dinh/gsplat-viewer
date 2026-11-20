@@ -38,6 +38,7 @@ ProjectionParams cpuParams(const RenderView& v) {
   p.viewport = glm::vec2(v.viewport);
   p.focal = v.focalPixels();
   p.tanHalfFov = v.tanHalfFov();
+  p.principal = v.principalPixels();
   p.nearPlane = v.nearPlane;
   return p;
 }
@@ -47,7 +48,7 @@ ProjectionParams cpuParams(const RenderView& v) {
 // Runs the GPU preprocess pass and compares every splat with the CPU implementation.
 // SH coefficients are uploaded as float32 or float16; the color tolerance follows:
 // float16 has a relative step of 2^-10, and up to 15 coefficients add up.
-static void checkPreprocessAgainstCpu(bool halfSh, float colorTolerance) {
+static void checkPreprocessAgainstCpu(bool halfSh, float colorTolerance, bool colmapIntrinsics = false) {
   const GaussianScene scene = makeDemoScene(20000, 11);
   SplatRenderer renderer;
   std::string log;
@@ -56,7 +57,11 @@ static void checkPreprocessAgainstCpu(bool halfSh, float colorTolerance) {
   renderer.setHalfPrecisionSh(halfSh);
   renderer.upload(scene);
 
-  const RenderView view = testView(scene, 0.7f);
+  RenderView view = testView(scene, 0.7f);
+  if (colmapIntrinsics) {  // non-square pixels and an off-center principal point, like a real camera
+    view.focalOverride = view.focalPixels() * glm::vec2(1.0f, 1.03f);
+    view.principal = 0.5f * glm::vec2(view.viewport) + glm::vec2(7.5f, -4.25f);
+  }
   renderer.preprocess(view, SplatSettings{});
   std::vector<ProjectedSplatCpu> gpu(scene.size());
   renderer.projectedBuffer().download(0, gpu.size() * sizeof(ProjectedSplatCpu), gpu.data());
@@ -100,6 +105,7 @@ static void checkPreprocessAgainstCpu(bool halfSh, float colorTolerance) {
 
 GPU_TEST_CASE(gpu_preprocess_matches_cpu_projection) { checkPreprocessAgainstCpu(false, 1e-4f); }
 GPU_TEST_CASE(gpu_preprocess_with_half_sh) { checkPreprocessAgainstCpu(true, 3e-3f); }
+GPU_TEST_CASE(gpu_preprocess_with_pinhole_intrinsics) { checkPreprocessAgainstCpu(false, 1e-4f, true); }
 
 GPU_TEST_CASE(gpu_viewport_culling_reduces_work) {
   // Close-up view: many splats are in front of the camera but outside the image.

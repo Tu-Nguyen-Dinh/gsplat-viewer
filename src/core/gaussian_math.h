@@ -29,6 +29,7 @@ struct ProjectionParams {
   glm::vec2 viewport{1.0f};      // pixels
   glm::vec2 focal{1.0f};         // focal length in pixels (x, y)
   glm::vec2 tanHalfFov{1.0f};    // tan(fov/2) horizontally and vertically
+  glm::vec2 principal{-1.0f};    // principal point in pixels (bottom-left origin); negative = viewport center
   float nearPlane = 0.01f;
   float splatScale = 1.0f;       // user multiplier on Gaussian size (debug)
   bool cullOutsideViewport = true;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -27,5 +28,17 @@ double psnr(const Image& a, const Image& b);
 
 // Largest per-channel absolute difference (0..255).
 int maxAbsDifference(const Image& a, const Image& b);
+
+// Structural similarity (Wang et al. 2004): 11x11 Gaussian window (sigma 1.5), averaged over the
+// RGB channels. 1 = identical; standard 3DGS papers report it next to PSNR.
+double ssim(const Image& a, const Image& b);
+
+// Reads one binary PPM ("P6", maxval 255) image, e.g. from `ffmpeg -i x.jpg -f image2pipe -vcodec ppm -`.
+// Returns false at end of stream or on malformed data (`error` is set for the latter).
+bool readPpmFrame(std::FILE* stream, Image& out, bool& error);
+
+// Next whitespace-separated number of a PNM (PGM / PPM) header; '#' comments are skipped. Exactly
+// one whitespace byte ends a field, so after the last one the binary pixels start.
+bool readPnmNumber(std::FILE* stream, int& value);
 
 }  // namespace gsv

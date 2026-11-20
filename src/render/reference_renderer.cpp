@@ -24,6 +24,7 @@ Image renderReference(const GaussianScene& scene, const RenderView& view, const 
   p.viewport = glm::vec2(view.viewport);
   p.focal = view.focalPixels();
   p.tanHalfFov = view.tanHalfFov();
+  p.principal = view.principalPixels();
   p.nearPlane = view.nearPlane;
   p.splatScale = o.splatScale;
   p.cullOutsideViewport = o.cullOutsideViewport;
