@@ -41,6 +41,17 @@ add_library(imgui STATIC
 target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 target_link_libraries(imgui PUBLIC glfw)
 
+# zstd decoder (third_party/zstd, v1.5.7, BSD): only used to read .spz version 4.
+file(GLOB GSV_ZSTD_SOURCES CONFIGURE_DEPENDS
+  third_party/zstd/lib/common/*.c third_party/zstd/lib/decompress/*.c)
+add_library(zstd_decoder STATIC ${GSV_ZSTD_SOURCES})
+target_include_directories(zstd_decoder PUBLIC third_party/zstd/lib)
+# Same defines as zstd's own build; no assembly fast path (portable C on every platform).
+target_compile_definitions(zstd_decoder PRIVATE ZSTD_DISABLE_ASM XXH_NAMESPACE=ZSTD_ ZSTD_LEGACY_SUPPORT=0)
+if(NOT MSVC)
+  target_compile_options(zstd_decoder PRIVATE -w)  # third-party code: not held to our warning flags
+endif()
+
 # Warnings for our own targets only.
 function(gsv_warnings target)
   if(MSVC)
@@ -61,6 +72,7 @@ add_library(gsplat_core STATIC
   src/core/sorting.cpp
   src/core/platform.cpp
   src/core/frame_select.cpp
+  src/core/inflate.cpp
   src/gl/gl_loader.cpp
   src/gl/shader.cpp
   src/gl/buffer.cpp
@@ -73,6 +85,7 @@ add_library(gsplat_core STATIC
   src/scene/scene_bounds.cpp
   src/scene/scene_edit.cpp
   src/scene/splat_codec.cpp
+  src/scene/spz_io.cpp
   src/render/point_renderer.cpp
   src/render/splat_renderer.cpp
   src/render/reference_renderer.cpp
@@ -81,7 +94,7 @@ add_library(gsplat_core STATIC
 # third_party/: Khronos GL headers and stb_image_write.h (single-file, vendored).
 target_include_directories(gsplat_core PUBLIC src third_party/khronos PRIVATE third_party/stb)
 find_package(Threads REQUIRED)  # std::thread / std::async (needs -pthread on Linux)
-target_link_libraries(gsplat_core PUBLIC glfw glm::glm Threads::Threads)
+target_link_libraries(gsplat_core PUBLIC glfw glm::glm Threads::Threads PRIVATE zstd_decoder)
 if(WIN32)
   target_link_libraries(gsplat_core PUBLIC shell32)  # CommandLineToArgvW (UTF-8 command line)
 endif()
@@ -141,6 +154,8 @@ if(GSV_BUILD_TESTS)
     tests/test_camera.cpp
     tests/test_scene_edit.cpp
     tests/test_splat_codec.cpp
+    tests/test_inflate.cpp
+    tests/test_spz.cpp
     tests/test_sorting.cpp
     tests/test_gpu_projection.cpp
     tests/test_gpu_render.cpp

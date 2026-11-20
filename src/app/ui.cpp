@@ -25,7 +25,7 @@ void App::drawUi() {
   ImGui::BeginDisabled(isLoading());
   if (ImGui::Button("Load") || enter) pendingLoad_ = pathInput_;
   ImGui::EndDisabled();
-  ImGui::TextDisabled("or drag & drop a .ply / .splat onto the window");
+  ImGui::TextDisabled("or drag & drop a .ply / .splat / .spz onto the window");
   if (isLoading()) {
     static const char kSpinner[] = "|/-\\";
     const double t = glfwGetTime();

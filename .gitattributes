@@ -5,3 +5,5 @@
 *.gif binary
 *.splat binary
 *.ply binary
+tests/data/inflate/* binary
+tests/data/spz/* binary

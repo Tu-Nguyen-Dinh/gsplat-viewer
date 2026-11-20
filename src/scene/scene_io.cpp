@@ -1,6 +1,7 @@
 #include "scene/scene_io.h"
 
 #include "scene/ply_io.h"
+#include "scene/spz_io.h"
 
 #include <algorithm>
 #include <chrono>
@@ -131,8 +132,10 @@ LoadResult loadScene(const std::filesystem::path& path) {
     r.ok = loadPly(path, r.scene, r.error);
   } else if (ext == ".splat") {
     r.ok = loadSplat(path, r.scene, r.error);
+  } else if (ext == ".spz") {
+    r.ok = loadSpz(path, r.scene, r.error);
   } else {
-    r.error = "Unsupported file type '" + ext + "' (use .ply or .splat; convert others with splat-transform)";
+    r.error = "Unsupported file type '" + ext + "' (use .ply, .splat or .spz; convert others with splat-transform)";
   }
   if (r.ok) {
     r.removedInvalid = removeInvalidSplats(r.scene);

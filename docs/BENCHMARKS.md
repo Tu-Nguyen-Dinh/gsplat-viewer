@@ -110,3 +110,23 @@ truck.splat (2 541 226 splats, SH degree 0), 1920×1080:
 Image error of the compressed format vs fp32 (same renderer, 1920×1080): truck 56.2 dB, truck
 inside 56.7 dB, captured room (SH degree 3) 57.3 dB, demo 1 M 59.9 dB. Held-out photos of the
 room: 30.25 dB compressed vs 30.26 dB fp32.
+
+## Task 2.5: .spz reader (v1.1, 21/11/2026)
+
+Versions 2-3 (one gzip stream) with an in-house DEFLATE/gzip decoder (RFC 1951/1952, CRC-32 checked).
+Files converted from PLY by PlayCanvas splat-transform 3.11.2 (`--spz-version 3`):
+
+| Scene | .spz size | load (parse) | render vs the source file (same renderer, 1280×720) |
+|---|---|---|---|
+| truck (2.54 M, SH 0) | 43.1 MB (.splat: 81.3 MB) | 709 ms (.splat: 465 ms) | 36.3 dB |
+| room "phong" (233 K, SH 3) | 6.0 MB (.ply: 54.9 MB) | 205 ms | 36.6 dB (37.4 dB at a second view) |
+
+The loss is the format's own quantization (8-bit color and alpha, log-scale steps of 1/16, SH in
+4-5 bits): splat-transform's own renderer gives 38.8 dB between its PLY and SPZ renders of the room.
+Our decoder matches splat-transform's decoder value for value (positions, scales, SH identical,
+quaternions within 1e-7); the only difference is deliberate: alpha 255 decodes to a finite logit
+(splat-transform writes +inf, which our loader would drop as invalid).
+
+Version 4 (zstd streams, splat-transform's default) with the vendored zstd 1.5.7 decoder: truck
+42.4 MB, parse 497 ms (v3 with our inflate: 701 ms); decodes to the same values as v3 of the same
+scene (test), render 65.5 dB from the v3 file.

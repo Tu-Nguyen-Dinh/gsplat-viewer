@@ -77,7 +77,10 @@ build/gsplat_viewer room.ply --eval          # PSNR/SSIM on the held-out photos 
 build/gsplat_viewer truck.splat --flip-y --crop-sphere -0.57,-0.6,-0.4,3.2 --save-edited truck_only.ply
 ```
 
-Other formats (`.spz`, `.sog`, `.ksplat`, ...) convert with `npx @playcanvas/splat-transform in.spz out.ply`.
+`.spz` (Niantic) versions 2-4 load directly: versions 2-3 with a gzip/DEFLATE decoder written for
+this project from RFC 1951/1952 (no zlib), version 4 with the vendored zstd decoder. Decoded values
+match splat-transform's decoder exactly. Other formats (`.sog`, `.ksplat`, ...) convert with
+`npx @playcanvas/splat-transform in.sog out.ply`.
 
 | Input | Action |
 |---|---|
