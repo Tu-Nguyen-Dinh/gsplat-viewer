@@ -1,5 +1,9 @@
 # gsplat-viewer
 
+[![ci](https://github.com/Tu-Nguyen-Dinh/gsplat-viewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Tu-Nguyen-Dinh/gsplat-viewer/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/Tu-Nguyen-Dinh/gsplat-viewer)](https://github.com/Tu-Nguyen-Dinh/gsplat-viewer/releases/latest)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A real-time **3D Gaussian Splatting** renderer written from scratch in **C++20 and OpenGL 4.3**:
 EWA projection, view-dependent color with spherical harmonics, and a stable radix sort that runs
 entirely in compute shaders. Every stage is unit-tested against a CPU reference and validated
@@ -7,7 +11,7 @@ against an independent renderer.
 
 ![Turntable of the demo scene: 300 K Gaussians with degree-3 spherical harmonics](docs/images/demo.gif)
 
-**1 M Gaussians at 1920×1080: 8.4 ms per frame (119 FPS) on an RTX 3060** · 42 tests · 40.6 dB PSNR vs PlayCanvas splat-transform
+**1 M Gaussians at 1920×1080: 8.4 ms per frame (119 FPS) on an RTX 3060** · 45 tests · 40.6 dB PSNR vs PlayCanvas splat-transform
 
 ## Highlights
 
@@ -41,6 +45,12 @@ flowchart LR
 | Preprocess (projection + SH) | 1.00 ms | memory bandwidth |
 | GPU radix sort (32-bit keys) | 2.47 ms | shared-memory ranking |
 | Draw (132 M fragments, ~57 layers/pixel) | 4.83 ms | fill rate |
+
+## Quick start (Windows)
+
+1. Download `gsplat-viewer-<version>-win64.zip` from [Releases](https://github.com/Tu-Nguyen-Dinh/gsplat-viewer/releases/latest) and unzip it (no installer, no DLLs).
+2. Run `gsplat_viewer.exe` to see the built-in demo scene.
+3. Drag a 3DGS `.ply` or `.splat` file onto the window (add `--flip-y` on the command line for COLMAP/INRIA scenes).
 
 ## Build
 
