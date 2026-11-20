@@ -22,6 +22,7 @@ void printUsage() {
       "  --yaw RADIANS        camera yaw around the scene\n"
       "  --sh 0..3            spherical harmonics degree\n"
       "  --key-bits 16|24|32  depth key precision of the GPU sort (default 24, same image as 32)\n"
+      "  --no-compress        upload 64-byte fp32 splats instead of the 24-byte compressed format\n"
       "  --sort MODE          none | cpu-std | cpu-radix | gpu (default)\n"
       "  --view MODE          color | depth | overdraw | ellipses\n"
       "  --distance SCALE     camera distance relative to the default framing\n"
@@ -76,6 +77,8 @@ bool parseOptions(int argc, char** argv, Options& o) {
       const char* v = next();
       if (!v) return printUsage(), false;
       o.shDegree = std::atoi(v);
+    } else if (a == "--no-compress") {
+      o.noCompress = true;
     } else if (a == "--key-bits") {
       const char* v = next();
       if (!v || (std::atoi(v) != 16 && std::atoi(v) != 24 && std::atoi(v) != 32)) return printUsage(), false;

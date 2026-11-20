@@ -72,6 +72,7 @@ add_library(gsplat_core STATIC
   src/scene/colmap_io.cpp
   src/scene/scene_bounds.cpp
   src/scene/scene_edit.cpp
+  src/scene/splat_codec.cpp
   src/render/point_renderer.cpp
   src/render/splat_renderer.cpp
   src/render/reference_renderer.cpp
@@ -139,6 +140,7 @@ if(GSV_BUILD_TESTS)
     tests/test_scene_bounds.cpp
     tests/test_camera.cpp
     tests/test_scene_edit.cpp
+    tests/test_splat_codec.cpp
     tests/test_sorting.cpp
     tests/test_gpu_projection.cpp
     tests/test_gpu_render.cpp

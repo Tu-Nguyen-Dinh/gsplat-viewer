@@ -60,6 +60,9 @@ class SplatRenderer {
   // Store SH bands 1..3 as float16 (default) or float32. Takes effect at the next upload().
   void setHalfPrecisionSh(bool half) { halfSh_ = half; }
   bool halfPrecisionSh() const { return halfSh_; }
+  // 24-byte compressed splats (default) or the 64-byte fp32 format. Takes effect at the next upload().
+  void setCompressed(bool compressed) { compressed_ = compressed; }
+  bool compressed() const { return compressed_; }
   void upload(const GaussianScene& scene);
   void render(const RenderView& view, const SplatSettings& settings);
 
@@ -100,7 +103,9 @@ class SplatRenderer {
   GpuTimer sortTimer_;
   GLuint vao_ = 0;
 
-  GlBuffer splats_;       // GpuSplat[count]
+  GlBuffer splats_;       // GpuSplat[count] (uncompressed format)
+  GlBuffer packed_;       // uint[6 * count] (compressed format, Morton order)
+  GlBuffer chunks_;       // vec4[2 * chunks]: min / max of every 256-splat chunk
   GlBuffer shRest_;       // float[count * 3 * restPerChannel]
   GlBuffer projected_;    // ProjectedSplat[count]
   GlBuffer order_;        // uint[count]  visible splat indices, in draw order
@@ -111,6 +116,7 @@ class SplatRenderer {
   int sceneShDegree_ = 0;
   int restPerChannel_ = 0;
   bool halfSh_ = true;
+  bool compressed_ = true;
   uint32_t shStride_ = 0;  // uints per splat in shRest_
   glm::vec2 depthRange_{0.0f, 1.0f};  // (zMin, 1 / (zMax - zMin)) for this frame
   glm::vec3 boundsCenter_{0.0f};

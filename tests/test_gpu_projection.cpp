@@ -2,20 +2,29 @@
 // CPU implementation in gaussian_math.cpp.
 #include "core/camera.h"
 #include "core/gaussian_math.h"
+#include "core/half.h"
 #include "render/splat_renderer.h"
 #include "scene/demo_scene.h"
 #include "test_framework.h"
 
 #include <algorithm>
+#include <bit>
 #include <vector>
 
 using namespace gsv;
 
 namespace {
 
-struct ProjectedSplatCpu {  // mirror of ProjectedSplat in splat_buffers.glsl
-  glm::vec4 centerDepthRadius, conicOpacity, axes, color;
+struct ProjectedSplatCpu {  // mirror of ProjectedSplat in splat_buffers.glsl (32 bytes)
+  glm::vec4 centerConic;    // center xy, conic xx, xy
+  glm::uvec4 bits;          // conic yy, depth (float bits), half2(r, g), half2(b, opacity)
+  bool visible() const { return bits.w != 0u; }
+  glm::vec3 conic() const { return {centerConic.z, centerConic.w, std::bit_cast<float>(bits.x)}; }
+  glm::vec3 color() const {
+    return {halfToFloat(uint16_t(bits.z & 0xFFFFu)), halfToFloat(uint16_t(bits.z >> 16)), halfToFloat(uint16_t(bits.w & 0xFFFFu))};
+  }
 };
+static_assert(sizeof(ProjectedSplatCpu) == 32);
 
 RenderView testView(const GaussianScene& scene, float yaw, int w = 640, int h = 480) {
   OrbitCamera cam;
@@ -55,6 +64,7 @@ static void checkPreprocessAgainstCpu(bool halfSh, float colorTolerance, bool co
   CHECK(renderer.init(log));
   if (!log.empty()) std::printf("%s\n", log.c_str());
   renderer.setHalfPrecisionSh(halfSh);
+  renderer.setCompressed(false);  // full precision, file order: GPU splat i == scene splat i
   renderer.upload(scene);
 
   RenderView view = testView(scene, 0.7f);
@@ -74,20 +84,20 @@ static void checkPreprocessAgainstCpu(bool halfSh, float colorTolerance, bool co
   for (size_t i = 0; i < scene.size(); ++i) {
     const Cov3 cov = covarianceFromScaleRotation(glm::exp(scene.logScale[i]), scene.rotation[i]);
     const ProjectedGaussian c = projectGaussian(scene.position[i], cov, params);
-    const bool gpuVis = gpu[i].centerDepthRadius.w > 0.0f;
+    const bool gpuVis = gpu[i].visible();
     if (c.visible) ++cpuVisible;
     if (c.visible != gpuVis) {
       ++mismatches;  // can differ only for splats exactly on the culling boundary
       continue;
     }
     if (!c.visible) continue;
-    maxCenterError = std::max(maxCenterError, glm::length(c.center - glm::vec2(gpu[i].centerDepthRadius)));
-    const glm::vec3 gc(gpu[i].conicOpacity);
+    maxCenterError = std::max(maxCenterError, glm::length(c.center - glm::vec2(gpu[i].centerConic)));
+    const glm::vec3 gc = gpu[i].conic();
     maxConicError = std::max(maxConicError, glm::length(c.conic - gc) / glm::length(c.conic));
     // View-dependent color (spherical harmonics, degree 3).
     const glm::vec3 dir = glm::normalize(scene.position[i] - view.cameraPosition);
     const glm::vec3 color = evalSphericalHarmonics(3, dir, scene.shDC[i], scene.restOf(i), scene.shRestPerChannel);
-    maxColorError = std::max(maxColorError, glm::length(color - glm::vec3(gpu[i].color)));
+    maxColorError = std::max(maxColorError, glm::length(color - gpu[i].color()));
   }
   std::printf("    SH %s: visible cpu %u gpu %u, boundary mismatches %u, max center err %.2e px,"
               " max conic rel err %.2e, max SH color err %.2e\n",
@@ -103,9 +113,10 @@ static void checkPreprocessAgainstCpu(bool halfSh, float colorTolerance, bool co
   CHECK(maxConicError < 1e-3f);
 }
 
-GPU_TEST_CASE(gpu_preprocess_matches_cpu_projection) { checkPreprocessAgainstCpu(false, 1e-4f); }
-GPU_TEST_CASE(gpu_preprocess_with_half_sh) { checkPreprocessAgainstCpu(true, 3e-3f); }
-GPU_TEST_CASE(gpu_preprocess_with_pinhole_intrinsics) { checkPreprocessAgainstCpu(false, 1e-4f, true); }
+// Colors are stored as fp16 in the projected buffer: error up to ~2^-11 relative.
+GPU_TEST_CASE(gpu_preprocess_matches_cpu_projection) { checkPreprocessAgainstCpu(false, 2e-3f); }
+GPU_TEST_CASE(gpu_preprocess_with_half_sh) { checkPreprocessAgainstCpu(true, 4e-3f); }
+GPU_TEST_CASE(gpu_preprocess_with_pinhole_intrinsics) { checkPreprocessAgainstCpu(false, 2e-3f, true); }
 
 GPU_TEST_CASE(gpu_viewport_culling_reduces_work) {
   // Close-up view: many splats are in front of the camera but outside the image.

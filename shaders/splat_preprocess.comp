@@ -1,12 +1,14 @@
 #version 430 core
 // Pass 1 of the splat pipeline, one invocation per Gaussian:
-//   project the 3D Gaussian to a 2D ellipse (EWA), evaluate its color for this view,
-//   cull it if invisible, and append visible splats to the draw list.
+//   decode the splat, project the 3D Gaussian to a 2D ellipse (EWA), evaluate its color for this
+//   view, cull it if invisible, and append visible splats to the draw list.
 #include "include/splat_buffers.glsl"
 
 layout(local_size_x = 256) in;
 
 layout(std430, binding = BINDING_SPLATS)    readonly buffer Splats    { GpuSplat splats[]; };
+layout(std430, binding = BINDING_PACKED)    readonly buffer Packed    { uint packedWords[]; };
+layout(std430, binding = BINDING_CHUNKS)    readonly buffer Chunks    { vec4 chunkBounds[]; };
 layout(std430, binding = BINDING_SH_REST)   readonly buffer ShRest    { uint shData[]; };
 layout(std430, binding = BINDING_PROJECTED) writeonly buffer Projected { ProjectedSplat projected[]; };
 layout(std430, binding = BINDING_ORDER)     writeonly buffer Order     { uint order[]; };
@@ -15,8 +17,10 @@ layout(std430, binding = BINDING_SORT_KEYS) writeonly buffer SortKeys  { uint so
 
 #include "include/gaussian.glsl"
 #include "include/spherical_harmonics.glsl"
+#include "include/splat_codec.glsl"
 
 uniform uint uCount;
+uniform int uCompressed;     // 1: packedWords + chunkBounds (24 B / splat), 0: splats[] (64 B)
 uniform mat4 uView;          // view * model
 uniform vec2 uViewport;
 uniform vec2 uFocal;
@@ -49,26 +53,42 @@ void main() {
     uint i = gl_GlobalInvocationID.x;
     if (i >= uCount) return;
 
-    GpuSplat s = splats[i];
-    Projection p = projectGaussian(s.positionOpacity.xyz, unpackCovariance(s.cov0, s.cov1), uView, uViewport,
-                                   uFocal, uPrincipal, uTanHalfFov, uNear, uSplatScale, uCull != 0);
-    if (!p.visible || s.positionOpacity.w < 1.0 / 255.0) {
-        projected[i].centerDepthRadius = vec4(0.0);
+    vec3 mean, dc;
+    float opacity;
+    mat3 cov;
+    if (uCompressed != 0) {
+        // 24 bytes instead of 64: the covariance is rebuilt from scale + rotation (a few dozen
+        // flops), which is cheaper than reading 40 more bytes per splat every frame.
+        uint b = 6u * i, c = 2u * (i / kCodecChunk);
+        DecodedSplat d = decodeSplat(packedWords[b], packedWords[b + 1u], packedWords[b + 2u], packedWords[b + 3u],
+                                     packedWords[b + 4u], packedWords[b + 5u], chunkBounds[c].xyz,
+                                     chunkBounds[c + 1u].xyz);
+        mean = d.position;
+        opacity = d.opacity;
+        dc = d.dc;
+        cov = covarianceFromScaleRotation(d.scale, d.rotation);
+    } else {
+        GpuSplat s = splats[i];
+        mean = s.positionOpacity.xyz;
+        opacity = s.positionOpacity.w;
+        dc = s.dc.rgb;
+        cov = unpackCovariance(s.cov0, s.cov1);
+    }
+
+    Projection p = projectGaussian(mean, cov, uView, uViewport, uFocal, uPrincipal, uTanHalfFov, uNear, uSplatScale,
+                                   uCull != 0);
+    if (!p.visible || opacity < 1.0 / 255.0) {
+        projected[i].bits = uvec4(0u);  // w == 0: culled (only read with CPU ordering)
         return;
     }
 
-    vec3 dir = normalize(s.positionOpacity.xyz - uCameraPos);
-    vec3 color = evalSphericalHarmonics(uShDegree, dir, s.dc.rgb, i * uShStride, uRestPerChannel);
+    vec3 dir = normalize(mean - uCameraPos);
+    vec3 color = evalSphericalHarmonics(uShDegree, dir, dc, i * uShStride, uRestPerChannel);
 
-    // Opacity-aware quad: the fragment shader discards alpha < 1/255, i.e. beyond
-    // sigma * sqrt(2 ln(255 opacity)). A faint splat (opacity 0.05: 1.7 sigma) would otherwise
-    // rasterize a 3-sigma quad of which ~70 % is discarded. Same image, fewer fragments.
-    float extent = min(kSigmaExtent, sqrt(2.0 * log(255.0 * s.positionOpacity.w)));
-    float shrink = extent / kSigmaExtent;
-    projected[i].centerDepthRadius = vec4(p.center, p.depth, ceil(p.radius * shrink));
-    projected[i].conicOpacity = vec4(p.conic, s.positionOpacity.w);
-    projected[i].axes = vec4(p.axisMajor * shrink, p.axisMinor * shrink);
-    projected[i].color = vec4(color, 1.0);
+    // 32 bytes: center and conic in fp32 (pixel positions need it), color and opacity in fp16.
+    projected[i].centerConic = vec4(p.center, p.conic.xy);
+    projected[i].bits = uvec4(floatBitsToUint(p.conic.z), floatBitsToUint(p.depth), packHalf2x16(color.rg),
+                              packHalf2x16(vec2(color.b, opacity)));
 
     // Append to the visible list. The counter doubles as the instance count of the indirect draw.
     uint slot = atomicAdd(drawCmd.instanceCount, 1u);

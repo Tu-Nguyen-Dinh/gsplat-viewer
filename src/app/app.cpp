@@ -104,6 +104,7 @@ int App::run(const Options& o) {
   mode_ = o.points ? RenderMode::Points : RenderMode::Splats;
   splatSettings_.shDegree = o.shDegree;
   splatSettings_.depthKeyBits = o.keyBits;
+  splats_.setCompressed(!o.noCompress);
   splatSettings_.sort = static_cast<SortMode>(o.sortMode);
   if (o.yaw > -999.0f) camera_.yaw = o.yaw;
   splatSettings_.debugView = static_cast<DebugView>(o.debugView);

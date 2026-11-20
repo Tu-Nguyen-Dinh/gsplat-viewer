@@ -19,6 +19,7 @@ struct Options {
   int width = 1600, height = 900;
   float yaw = -1000.0f;        // camera yaw in radians (default: keep the camera's)
   int shDegree = 3;
+  bool noCompress = false;      // --no-compress: 64-byte fp32 splats instead of the 24-byte format
   int keyBits = 24;             // --key-bits 16|24|32: GPU sort key precision (24 = same image as 32, 6 passes)
   int sortMode = 3;            // SortMode: 0 none, 1 cpu-std, 2 cpu-radix, 3 gpu
   int debugView = 0;           // DebugView: 0 color, 1 depth, 2 overdraw, 3 ellipses

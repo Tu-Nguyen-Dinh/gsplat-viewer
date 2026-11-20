@@ -89,3 +89,24 @@ truck.splat, 1920×1080, orbit, frame = **median** of 240 frame intervals (was t
   always fastest. The v1.0 frame time was total / frames, so one hitch outside the renderer
   (seen once: 21 ms frame for 13 ms of GPU work) inflated a whole configuration. The benchmark now
   reports the median interval; repeated runs agree within ±1 FPS.
+
+## Task 2.4: compressed GPU format (v1.1, 21/11/2026)
+
+Static data per splat 64 → **24 bytes** (SH bands 1–3 excluded): 16-bit positions inside the bounds
+of 256-splat chunks (splats sorted along a Morton curve so chunks are compact), fp16 log-scale,
+opacity and SH DC, smallest-three quaternion in 32 bits. The covariance is rebuilt in the
+preprocess shader. The per-frame projected buffer went 64 → 32 bytes (center + conic fp32,
+color + opacity fp16, ellipse axes rebuilt in the vertex shader).
+
+truck.splat (2 541 226 splats, SH degree 0), 1920×1080:
+
+| | fp32 (`--no-compress`) | compressed (default) |
+|---|---|---|
+| GPU buffers (v1.0: 339.3 MB, 133 B/splat) | 252.0 MB | **155.4 MB (64 B/splat)** |
+| preprocess | 0.80–0.87 ms | **0.51–0.54 ms** |
+| FPS, default config (24-bit keys, RGBA16F) | 81–82 | **84–86** |
+| scene upload | 446–450 ms | 520–566 ms (Morton sort 60 ms + packing 180 ms) |
+
+Image error of the compressed format vs fp32 (same renderer, 1920×1080): truck 56.2 dB, truck
+inside 56.7 dB, captured room (SH degree 3) 57.3 dB, demo 1 M 59.9 dB. Held-out photos of the
+room: 30.25 dB compressed vs 30.26 dB fp32.
