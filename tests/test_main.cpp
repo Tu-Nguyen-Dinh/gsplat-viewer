@@ -3,13 +3,23 @@
 #include "test_framework.h"
 
 #include <chrono>
+#include <csignal>
+#include <cstdlib>
 #include <cstring>
 
 namespace test {
 
 namespace {
 int gCurrentFailures = 0;
+const char* volatile gCurrentTest = nullptr;  // read by the crash handler
+
+// A crash would otherwise end the run silently (CI pipes stdout, so buffered output is lost):
+// name the test that was running, then exit with the conventional 128 + signal code.
+extern "C" void onCrash(int sig) {
+  std::fprintf(stderr, "\n*** CRASH (signal %d) in test: %s\n", sig, gCurrentTest ? gCurrentTest : "<startup>");
+  std::_Exit(128 + sig);
 }
+}  // namespace
 
 std::vector<Case>& registry() {
   static std::vector<Case> cases;
@@ -24,6 +34,9 @@ void reportFailure(const char* file, int line, const std::string& message) {
 }  // namespace test
 
 int main(int argc, char** argv) {
+  std::setvbuf(stdout, nullptr, _IONBF, 0);  // every line reaches the log even if a test crashes
+  for (int sig : {SIGSEGV, SIGABRT, SIGFPE, SIGILL}) std::signal(sig, test::onCrash);
+
   bool cpu = true, gpu = true;
   const char* filter = nullptr;
   for (int i = 1; i < argc; ++i) {
@@ -48,6 +61,7 @@ int main(int argc, char** argv) {
       continue;
     }
     test::gCurrentFailures = 0;
+    test::gCurrentTest = c.name;
     const auto t0 = std::chrono::steady_clock::now();
     c.fn();
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();

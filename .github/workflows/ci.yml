@@ -17,3 +17,39 @@ jobs:
         run: cmake --build build -j 4
       - name: CPU tests (GPU tests need a display and are skipped on CI)
         run: ctest --test-dir build -R cpu_tests --output-on-failure
+
+  linux-sanitizers:
+    # AddressSanitizer + UndefinedBehaviorSanitizer: turns silent memory bugs into a report with a stack trace.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GLFW build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl-dev
+      - name: Configure (ASan + UBSan)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DGLFW_BUILD_WAYLAND=OFF "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined" "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+      - name: Build
+        run: cmake --build build -j 4 --target gsplat_tests
+      - name: CPU tests
+        run: ./build/gsplat_tests --cpu-only
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build
+      - name: CPU tests (no GPU on hosted runners)
+        run: ctest --test-dir build -R cpu_tests --output-on-failure
