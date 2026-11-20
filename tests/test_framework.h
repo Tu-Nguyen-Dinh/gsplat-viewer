@@ -41,6 +41,16 @@ struct Registrar {
     if (!(cond)) test::reportFailure(__FILE__, __LINE__, "CHECK(" #cond ")"); \
   } while (0)
 
+// Like CHECK, but stops the test: use it for preconditions the rest of the test relies on
+// (e.g. "the file loaded"), so a failure is reported instead of crashing on an empty vector.
+#define REQUIRE(cond)                                                  \
+  do {                                                                 \
+    if (!(cond)) {                                                     \
+      test::reportFailure(__FILE__, __LINE__, "REQUIRE(" #cond ")");   \
+      return;                                                          \
+    }                                                                  \
+  } while (0)
+
 #define CHECK_NEAR(a, b, tol)                                                                      \
   do {                                                                                             \
     const double gsvA_ = static_cast<double>(a), gsvB_ = static_cast<double>(b);                   \

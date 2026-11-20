@@ -21,7 +21,7 @@ TEST_CASE(ply_roundtrip_is_exact) {
   const auto path = tempFile("gsv_roundtrip.ply");
   CHECK(savePly(path, a, error));
   GaussianScene b;
-  CHECK(loadPly(path, b, error));
+  REQUIRE(loadPly(path, b, error));
   CHECK(b.size() == a.size());
   CHECK(b.shDegree == a.shDegree);
   bool same = true;
@@ -50,7 +50,7 @@ TEST_CASE(ply_point_cloud_with_uchar_colors) {
   }
   GaussianScene s;
   std::string error;
-  CHECK(loadPly(path, s, error));
+  REQUIRE(loadPly(path, s, error));
   CHECK(s.size() == 2);
   CHECK(s.position[1] == glm::vec3(-1, 0, 0.5f));
   CHECK_NEAR(baseColor(s, 0).r, 1.0, 1e-5);
@@ -90,7 +90,7 @@ TEST_CASE(splat_roundtrip_within_quantization) {
   CHECK(saveSplat(path, a, error));
   CHECK(std::filesystem::file_size(path) == a.size() * 32);
   GaussianScene b;
-  CHECK(loadSplat(path, b, error));
+  REQUIRE(loadSplat(path, b, error));
   CHECK(b.size() == a.size());
   float maxPos = 0, maxScale = 0, maxColor = 0, maxOpacity = 0, maxRotDot = 0;
   for (size_t i = 0; i < a.size(); ++i) {
@@ -113,8 +113,8 @@ TEST_CASE(splat_roundtrip_within_quantization) {
 TEST_CASE(splat_fixture_from_splat_transform) {
   // tests/data/minimal.splat comes from PlayCanvas splat-transform's test fixtures (MIT).
   const LoadResult r = loadScene(std::filesystem::path(GSV_TEST_DATA_DIR) / "minimal.splat");
-  CHECK(r.ok);
-  CHECK(r.scene.size() == 4);
+  REQUIRE(r.ok);
+  REQUIRE(r.scene.size() == 4);
   CHECK(r.removedInvalid == 0);
   CHECK(r.scene.position[0] == glm::vec3(-1, 0, -1));
   CHECK_NEAR(std::exp(r.scene.logScale[0].x), 0.1, 1e-6);
@@ -134,7 +134,7 @@ TEST_CASE(load_scene_dispatches_by_extension) {
   const auto ply = tempFile("gsv_dispatch.PLY");  // extension check is case-insensitive
   CHECK(savePly(ply, a, error));
   const LoadResult r = loadScene(ply);
-  CHECK(r.ok);
+  REQUIRE(r.ok);
   CHECK(r.scene.size() == 200);
   CHECK(r.scene.shDegree == 3);
   CHECK(r.scene.sourceName == "gsv_dispatch.PLY");
@@ -166,7 +166,7 @@ TEST_CASE(load_scene_async) {
   CHECK(savePly(path, a, error));
   std::future<LoadResult> f = loadSceneAsync(path);  // returns immediately
   const LoadResult r = f.get();                      // waits for the worker thread
-  CHECK(r.ok);
+  REQUIRE(r.ok);
   CHECK(r.scene.size() == 5000);
   CHECK(r.milliseconds > 0.0);
   std::filesystem::remove(path);

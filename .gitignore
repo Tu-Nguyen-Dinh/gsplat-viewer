@@ -9,3 +9,5 @@ out/
 !assets/.gitkeep
 imgui.ini
 dist/
+!tests/data/*.splat
+!tests/data/*.ply
