@@ -1,10 +1,33 @@
 #pragma once
-// Minimal hand-written OpenGL 4.3 function loader (replaces glad/GLEW).
+// OpenGL entry points for the two targets of the project:
 //
-// glcorearb.h provides the types, enums and PFNGL...PROC typedefs. Every function
-// this project uses is listed once in GSV_GL_FUNCTIONS; the X-macro expands that
-// list into extern declarations here and into definitions + loading in the .cpp.
-// To use a new GL function: add one line to the list.
+//  * Desktop OpenGL 4.3 (default): a minimal hand-written loader (replaces glad/GLEW).
+//    glcorearb.h provides the types, enums and PFNGL...PROC typedefs. Every function
+//    this project uses is listed once in GSV_GL_FUNCTIONS; the X-macro expands that
+//    list into extern declarations here and into definitions + loading in the .cpp.
+//    To use a new GL function: add one line to the list.
+//
+//  * OpenGL ES 3.1+ (Android, GSV_GLES defined): the functions are exported by
+//    libGLESv3 and declared by <GLES3/gl32.h>, so there is nothing to load. The code
+//    only uses the common subset of the two APIs; the few differences are guarded by
+//    GSV_GLES where they are used (buffer read-back, timer queries, point size).
+
+#if defined(GSV_GLES)
+
+#include <GLES3/gl32.h>
+#include <GLES2/gl2ext.h>  // GL_TIME_ELAPSED_EXT (EXT_disjoint_timer_query)
+
+#include <string>
+
+namespace gl {
+using ProcLoader = void* (*)(const char* name);
+inline bool loadFunctions(ProcLoader, std::string& missing) {
+  missing.clear();
+  return true;
+}
+}  // namespace gl
+
+#else  // desktop OpenGL 4.3
 
 // Defining APIENTRY ourselves stops glcorearb.h from pulling in <windows.h>
 // (and its min/max macros) on Windows.
@@ -63,6 +86,8 @@
   X(PFNGLBINDBUFFERPROC, glBindBuffer)                              \
   X(PFNGLBINDBUFFERBASEPROC, glBindBufferBase)                      \
   X(PFNGLBUFFERDATAPROC, glBufferData)                              \
+  X(PFNGLMAPBUFFERRANGEPROC, glMapBufferRange)                      \
+  X(PFNGLUNMAPBUFFERPROC, glUnmapBuffer)                            \
   X(PFNGLBUFFERSUBDATAPROC, glBufferSubData)                        \
   X(PFNGLDELETEBUFFERSPROC, glDeleteBuffers)                        \
   X(PFNGLVERTEXATTRIBPOINTERPROC, glVertexAttribPointer)            \
@@ -100,6 +125,7 @@
   X(PFNGLBEGINQUERYPROC, glBeginQuery)                              \
   X(PFNGLENDQUERYPROC, glEndQuery)                                  \
   X(PFNGLGETQUERYOBJECTIVPROC, glGetQueryObjectiv)                  \
+  X(PFNGLGETQUERYOBJECTUIVPROC, glGetQueryObjectuiv)                \
   X(PFNGLGETQUERYOBJECTUI64VPROC, glGetQueryObjectui64v)            \
   /* debug output (GL 4.3) */                                       \
   X(PFNGLDEBUGMESSAGECALLBACKPROC, glDebugMessageCallback)          \
@@ -118,3 +144,5 @@ using ProcLoader = void* (*)(const char* name);
 bool loadFunctions(ProcLoader loader, std::string& missing);
 
 }  // namespace gl
+
+#endif  // GSV_GLES

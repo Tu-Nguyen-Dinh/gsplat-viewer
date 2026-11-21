@@ -70,6 +70,14 @@ flowchart LR
 2. Run `gsplat_viewer.exe` to see the built-in demo scene.
 3. Drag a 3DGS `.ply` or `.splat` file onto the window (add `--flip-y` on the command line for COLMAP/INRIA scenes).
 
+## Android (in progress)
+
+The same renderer runs on phones with OpenGL ES 3.1+ (NativeActivity, no Java): virtual joysticks
+to walk through a scene, and a PC workflow where the phone uploads a video from its browser to
+`gsplat_server`, the PC trains it, and the app downloads the result. Built without Gradle by
+`tools/build_android.ps1`; every shader is checked as GLSL ES 3.10 on CI. See
+[docs/ANDROID.md](docs/ANDROID.md).
+
 ## Build
 
 Requirements: CMake ≥ 3.24, a C++20 compiler (tested with MinGW-w64 GCC 15.2), an OpenGL 4.3 GPU.

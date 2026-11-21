@@ -60,6 +60,9 @@ class ShaderProgram {
 const std::string& shaderDirectory();
 void setShaderDirectory(const std::string& dir);
 std::string shaderPath(const std::string& file);  // shaderDirectory() + "/" + file
+// Shader source with every #include expanded and the #version line of the chosen dialect
+// (desktop GLSL 4.30 or GLSL ES 3.10). Used to check the ES sources offline (gsplat_shaderdump).
+bool expandShaderSource(const std::string& file, bool openglEs, std::string& out, std::string& log);
 
 // Picks the shader directory: the first of `override` (if not empty), `<exeDir>/shaders` and
 // GSV_SHADER_DIR that contains `marker`. Returns an empty string if none does.

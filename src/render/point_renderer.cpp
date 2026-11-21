@@ -48,7 +48,9 @@ void PointRenderer::upload(const GaussianScene& scene) {
 void PointRenderer::draw(const Params& p) {
   if (!program_.valid() || count_ == 0) return;
   glEnable(GL_DEPTH_TEST);
-  glEnable(GL_PROGRAM_POINT_SIZE);
+#if !defined(GSV_GLES)
+  glEnable(GL_PROGRAM_POINT_SIZE);  // always on in OpenGL ES
+#endif
   glDisable(GL_BLEND);
   program_.use();
   program_.set("uViewProj", p.projection * p.view);

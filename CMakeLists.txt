@@ -26,20 +26,35 @@ set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 
-FetchContent_Declare(glfw  GIT_REPOSITORY https://github.com/glfw/glfw.git   GIT_TAG 3.4     GIT_SHALLOW TRUE)
 FetchContent_Declare(glm   GIT_REPOSITORY https://github.com/g-truc/glm.git  GIT_TAG 1.0.1   GIT_SHALLOW TRUE)
 FetchContent_Declare(imgui GIT_REPOSITORY https://github.com/ocornut/imgui.git GIT_TAG v1.91.9b GIT_SHALLOW TRUE)
-FetchContent_MakeAvailable(glfw glm imgui)
 
-add_library(imgui STATIC
-  ${imgui_SOURCE_DIR}/imgui.cpp
-  ${imgui_SOURCE_DIR}/imgui_draw.cpp
-  ${imgui_SOURCE_DIR}/imgui_tables.cpp
-  ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-  ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
-  ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
+if(ANDROID)
+  # Android (NDK, tools/build_android.ps1): OpenGL ES 3.2 through EGL, no GLFW; ImGui uses its
+  # Android input backend and the OpenGL ES 3 renderer.
+  FetchContent_MakeAvailable(glm imgui)
+  add_library(imgui STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_android.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
+  target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_ES3)
+  target_link_libraries(imgui PUBLIC android log GLESv3 EGL)
+else()
+  FetchContent_Declare(glfw GIT_REPOSITORY https://github.com/glfw/glfw.git GIT_TAG 3.4 GIT_SHALLOW TRUE)
+  FetchContent_MakeAvailable(glfw glm imgui)
+  add_library(imgui STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
+  target_link_libraries(imgui PUBLIC glfw)
+endif()
 target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
-target_link_libraries(imgui PUBLIC glfw)
 
 # zstd decoder (third_party/zstd, v1.5.7, BSD): only used to read .spz version 4.
 file(GLOB GSV_ZSTD_SOURCES CONFIGURE_DEPENDS
@@ -73,6 +88,7 @@ add_library(gsplat_core STATIC
   src/core/platform.cpp
   src/core/frame_select.cpp
   src/core/inflate.cpp
+  src/core/net.cpp
   src/gl/gl_loader.cpp
   src/gl/shader.cpp
   src/gl/buffer.cpp
@@ -94,18 +110,35 @@ add_library(gsplat_core STATIC
 # third_party/: Khronos GL headers and stb_image_write.h (single-file, vendored).
 target_include_directories(gsplat_core PUBLIC src third_party/khronos PRIVATE third_party/stb)
 find_package(Threads REQUIRED)  # std::thread / std::async (needs -pthread on Linux)
-target_link_libraries(gsplat_core PUBLIC glfw glm::glm Threads::Threads PRIVATE zstd_decoder)
+target_link_libraries(gsplat_core PUBLIC glm::glm Threads::Threads PRIVATE zstd_decoder)
+if(ANDROID)
+  # OpenGL ES 3.2: libGLESv3 exports the functions, EGL provides the context.
+  target_link_libraries(gsplat_core PUBLIC GLESv3 EGL log)
+  target_compile_definitions(gsplat_core PUBLIC GSV_GLES)
+else()
+  target_link_libraries(gsplat_core PUBLIC glfw)
+endif()
 if(WIN32)
-  target_link_libraries(gsplat_core PUBLIC shell32)  # CommandLineToArgvW (UTF-8 command line)
+  target_link_libraries(gsplat_core PUBLIC shell32 ws2_32)  # CommandLineToArgvW (UTF-8 command line), sockets
 endif()
 target_compile_definitions(gsplat_core PUBLIC
   GLFW_INCLUDE_NONE
   GLM_ENABLE_EXPERIMENTAL
   # Shaders are read from the source tree so they can be edited and hot-reloaded (F5).
   GSV_VERSION="${PROJECT_VERSION}"
-  GSV_SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
-  GSV_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data")
+  GSV_SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders")
+if(ANDROID)  # gsplat_tests_cpu runs on the phone with the data pushed next to it (adb)
+  target_compile_definitions(gsplat_core PUBLIC GSV_TEST_DATA_DIR="/data/local/tmp/gsplat/tests/data")
+else()
+  target_compile_definitions(gsplat_core PUBLIC GSV_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data")
+endif()
 gsv_warnings(gsplat_core)
+
+if(ANDROID)
+  # The Android app (NativeActivity, android/) replaces the desktop viewer, tools and tests.
+  add_subdirectory(android)
+  return()
+endif()
 
 # ---------------------------------------------------------------------------
 # Viewer application
@@ -132,8 +165,19 @@ endif()
 add_executable(gsplat_prep src/tools/prep_main.cpp)
 target_link_libraries(gsplat_prep PRIVATE gsplat_core)
 gsv_warnings(gsplat_prep)
+
+# Writes the shaders with #includes expanded (desktop or ES dialect) for offline checking.
+add_executable(gsplat_shaderdump src/tools/shaderdump_main.cpp)
+target_link_libraries(gsplat_shaderdump PRIVATE gsplat_core)
+gsv_warnings(gsplat_shaderdump)
+
+# PC side of the phone capture workflow: upload page, training queue, scene downloads.
+add_executable(gsplat_server src/tools/server_main.cpp)
+target_link_libraries(gsplat_server PRIVATE gsplat_core)
+gsv_warnings(gsplat_server)
 if(MINGW)
   target_link_options(gsplat_prep PRIVATE -static)
+  target_link_options(gsplat_server PRIVATE -static)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -156,6 +200,7 @@ if(GSV_BUILD_TESTS)
     tests/test_splat_codec.cpp
     tests/test_inflate.cpp
     tests/test_spz.cpp
+    tests/test_net.cpp
     tests/test_sorting.cpp
     tests/test_gpu_projection.cpp
     tests/test_gpu_render.cpp

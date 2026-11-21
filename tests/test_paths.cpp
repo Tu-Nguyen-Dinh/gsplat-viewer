@@ -28,7 +28,7 @@ TEST_CASE(executable_directory_contains_the_test_binary) {
   CHECK(!dir.empty());
   bool found = false;
   for (const auto& e : fs::directory_iterator(pathFromUtf8(dir)))
-    found |= e.path().stem() == "gsplat_tests";
+    found |= e.path().stem().string().rfind("gsplat_tests", 0) == 0;  // gsplat_tests(.exe), gsplat_tests_cpu
   CHECK(found);
 }
 
@@ -39,8 +39,10 @@ TEST_CASE(shader_directory_lookup_order) {
   const fs::path custom = root / "custom";
   fs::create_directories(exeDir);
 
+#if !defined(__ANDROID__)  // a phone has no source tree to fall back to
   // Nothing next to the exe: falls back to the source tree (GSV_SHADER_DIR has the real shaders).
   CHECK(findShaderDirectory("", pathToUtf8(exeDir)) == GSV_SHADER_DIR);
+#endif
 
   // Packaged layout <exe>/shaders wins over the source tree.
   makeShaderDir(exeDir / "shaders");

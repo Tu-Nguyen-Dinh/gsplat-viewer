@@ -23,7 +23,9 @@ bool GpuRadixSort::init(std::string& log) {
 
 bool GpuRadixSort::reloadShaders(std::string& log) {
   std::string a, b, c, d;
-  const bool ok = histogram_.reload(a) & scatter_.reload(b) & scanLocal_.reload(c) & scanAdd_.reload(d);
+  // Reload all four (no short-circuit) so every compile error is reported at once.
+  const bool ok1 = histogram_.reload(a), ok2 = scatter_.reload(b), ok3 = scanLocal_.reload(c), ok4 = scanAdd_.reload(d);
+  const bool ok = ok1 && ok2 && ok3 && ok4;
   log = a + b + c + d;
   return ok;
 }

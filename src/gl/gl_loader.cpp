@@ -1,5 +1,8 @@
 #include "gl/gl_loader.h"
 
+// Desktop OpenGL only: on OpenGL ES the functions come straight from libGLESv3.
+#if !defined(GSV_GLES)
+
 #define GSV_DEFINE_GL(type, name) type name = nullptr;
 GSV_GL_FUNCTIONS(GSV_DEFINE_GL)
 #undef GSV_DEFINE_GL
@@ -17,3 +20,5 @@ bool loadFunctions(ProcLoader loader, std::string& missing) {
 }
 
 }  // namespace gl
+
+#endif  // !GSV_GLES

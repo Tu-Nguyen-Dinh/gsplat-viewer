@@ -1,5 +1,6 @@
 #include "gl/buffer.h"
 
+#include <cstring>
 #include <utility>
 
 namespace gsv {
@@ -37,9 +38,17 @@ void GlBuffer::upload(size_t offset, size_t bytes, const void* data) {
 }
 
 void GlBuffer::download(size_t offset, size_t bytes, void* out) const {
+  // glMapBufferRange instead of glGetBufferSubData: the latter does not exist in OpenGL ES.
   glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
   glBindBuffer(GL_COPY_READ_BUFFER, id_);
-  glGetBufferSubData(GL_COPY_READ_BUFFER, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(bytes), out);
+  const void* src =
+      glMapBufferRange(GL_COPY_READ_BUFFER, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(bytes), GL_MAP_READ_BIT);
+  if (src) {
+    std::memcpy(out, src, bytes);
+    glUnmapBuffer(GL_COPY_READ_BUFFER);
+  } else {
+    std::memset(out, 0, bytes);
+  }
 }
 
 void GlBuffer::bindBase(GLenum target, GLuint index) const { glBindBufferBase(target, index, id_); }

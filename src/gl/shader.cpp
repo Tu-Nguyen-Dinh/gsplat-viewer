@@ -49,10 +49,24 @@ bool readText(const std::string& path, std::string& out) {
   return true;
 }
 
+// The shaders are written once, for desktop GLSL 4.30. For OpenGL ES the first line becomes
+// GLSL ES 3.10 plus default precisions (ES fragment shaders have no default float precision);
+// everything else in the sources sticks to the common subset of the two languages.
+#if defined(GSV_GLES)
+constexpr bool kDefaultEs = true;
+#else
+constexpr bool kDefaultEs = false;
+#endif
+const char* versionLine(bool es) {
+  // 3.10 (not 3.20): the shaders need nothing newer, and it also runs on ES 3.1 devices and the
+  // Android emulator (which exposes OpenGL ES 3.1).
+  return es ? "#version 310 es\nprecision highp float;\nprecision highp int;\n#define GSV_GLES 1\n" : "#version 430 core\n";
+}
+
 // Expands `#include "x"` recursively (each file at most once) and injects `defines`
 // after the #version line. Returns false if a file is missing.
 bool preprocess(const std::string& file, const std::string& defines, std::string& out, std::string& log,
-                std::set<std::string>& included) {
+                std::set<std::string>& included, bool es = kDefaultEs) {
   std::string src;
   if (!readText(shaderPath(file), src)) {
     log += "Cannot read shader file: " + shaderPath(file) + "\n";
@@ -69,11 +83,15 @@ bool preprocess(const std::string& file, const std::string& defines, std::string
         return false;
       }
       const std::string inc = line.substr(a + 1, b - a - 1);
-      if (included.insert(inc).second && !preprocess(inc, {}, out, log, included)) return false;
+      if (included.insert(inc).second && !preprocess(inc, {}, out, log, included, es)) return false;
+      continue;
+    }
+    if (line.rfind("#version", 0) == 0) {
+      out += versionLine(es);
+      out += defines;
       continue;
     }
     out += line + "\n";
-    if (line.rfind("#version", 0) == 0) out += defines;
   }
   return true;
 }
@@ -120,6 +138,12 @@ GLuint linkProgram(std::initializer_list<GLuint> stages, std::string& log) {
 }
 
 }  // namespace
+
+bool expandShaderSource(const std::string& file, bool openglEs, std::string& out, std::string& log) {
+  out.clear();
+  std::set<std::string> included;
+  return preprocess(file, {}, out, log, included, openglEs);
+}
 
 ShaderProgram::~ShaderProgram() {
   if (program_) glDeleteProgram(program_);
