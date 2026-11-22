@@ -33,3 +33,5 @@ struct DrawCommand {
 #define BINDING_SORT_KEYS  5
 #define BINDING_PACKED     6
 #define BINDING_CHUNKS     7
+#define BINDING_DEPTH_GRAD 8   // vec2 per splat: screen-space depth gradient (only with depth output)
+#define BINDING_FLAGS      9   // uint per 4 splats: edit flags, 8 bits each (bit 0 selected, bit 1 hidden)

@@ -39,6 +39,11 @@ void printUsage() {
       "  --min-opacity A      edit: delete splats with opacity < A (floaters)\n"
       "  --max-size S         edit: delete splats whose largest axis > S scene units\n"
       "  --crop-sphere x,y,z,r  edit: delete everything outside this sphere (display space)\n"
+      "  --las FILE             add a LAS 1.2-1.4 point-cloud layer (drawn opaque, occludes splats)\n"
+      "  --las-stride N         load every N-th LAS point\n"
+      "  --las-transform s,qw,qx,qy,qz,tx,ty,tz  LAS world -> scene coordinates (e.g. from gsv_icp)\n"
+      "  --lod N                level of detail: draw at most N splats, refined around the camera\n"
+      "  --lod-error PX         LOD refinement threshold in pixels (default 1.5)\n"
       "  --save-edited F.ply  write the edited scene as a standard 3DGS PLY\n"
       "  --eval               render every held-out training view, compare with the photo (PSNR, SSIM)\n"
       "                       and with Brush's render; writes <scene dir>/eval/ and exits\n"
@@ -65,6 +70,7 @@ bool parseOptions(int argc, char** argv, Options& o) {
     } else if (a == "--size") {
       const char* v = next();
       if (!v || std::sscanf(v, "%dx%d", &o.width, &o.height) != 2) return printUsage(), false;
+      o.sizeGiven = true;
     } else if (a == "--gen") {
       const char* v = next();
       if (!v) return printUsage(), false;
@@ -78,6 +84,7 @@ bool parseOptions(int argc, char** argv, Options& o) {
       const char* v = next();
       if (!v) return printUsage(), false;
       o.shDegree = std::atoi(v);
+      o.shGiven = true;
     } else if (a == "--no-compress") {
       o.noCompress = true;
     } else if (a == "--key-bits") {
@@ -109,6 +116,7 @@ bool parseOptions(int argc, char** argv, Options& o) {
       float* dst = a == "--camera-pos" ? o.cameraPos : a == "--camera-target" ? o.cameraTarget : o.background;
       if (!v || std::sscanf(v, "%f,%f,%f", &dst[0], &dst[1], &dst[2]) != 3) return printUsage(), false;
       if (a != "--background") o.hasCamera = true;
+      else o.backgroundGiven = true;
     } else if (a == "--min-opacity" || a == "--max-size") {
       const char* v = next();
       if (!v) return printUsage(), false;
@@ -118,6 +126,28 @@ bool parseOptions(int argc, char** argv, Options& o) {
       float* c = o.cropSphere;
       if (!v || std::sscanf(v, "%f,%f,%f,%f", &c[0], &c[1], &c[2], &c[3]) != 4) return printUsage(), false;
       o.hasCropSphere = true;
+    } else if (a == "--las") {
+      const char* v = next();
+      if (!v) return printUsage(), false;
+      o.las = v;
+    } else if (a == "--las-stride") {
+      const char* v = next();
+      if (!v || std::atoi(v) < 1) return printUsage(), false;
+      o.lasStride = std::atoi(v);
+    } else if (a == "--las-transform") {
+      const char* v = next();
+      double* t = o.lasTransform;
+      if (!v || std::sscanf(v, "%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf", &t[0], &t[1], &t[2], &t[3], &t[4], &t[5], &t[6], &t[7]) != 8)
+        return printUsage(), false;
+      o.hasLasTransform = true;
+    } else if (a == "--lod") {
+      const char* v = next();
+      if (!v || std::atoll(v) < 1000) return printUsage(), false;
+      o.lodBudget = std::atoll(v);
+    } else if (a == "--lod-error") {
+      const char* v = next();
+      if (!v || std::atof(v) <= 0.0) return printUsage(), false;
+      o.lodPixelError = static_cast<float>(std::atof(v));
     } else if (a == "--save-edited") {
       const char* v = next();
       if (!v) return printUsage(), false;

@@ -77,6 +77,7 @@ inline bool loadFunctions(ProcLoader, std::string& missing) {
   X(PFNGLUNIFORM2FPROC, glUniform2f)                                \
   X(PFNGLUNIFORM3FPROC, glUniform3f)                                \
   X(PFNGLUNIFORM4FPROC, glUniform4f)                                \
+  X(PFNGLUNIFORMMATRIX3FVPROC, glUniformMatrix3fv)                  \
   X(PFNGLUNIFORMMATRIX4FVPROC, glUniformMatrix4fv)                  \
   /* buffers & vertex arrays */                                     \
   X(PFNGLGENVERTEXARRAYSPROC, glGenVertexArrays)                    \
@@ -117,6 +118,8 @@ inline bool loadFunctions(ProcLoader, std::string& missing) {
   X(PFNGLDELETEFRAMEBUFFERSPROC, glDeleteFramebuffers)              \
   X(PFNGLBINDFRAMEBUFFERPROC, glBindFramebuffer)                    \
   X(PFNGLFRAMEBUFFERTEXTURE2DPROC, glFramebufferTexture2D)          \
+  X(PFNGLDRAWBUFFERSPROC, glDrawBuffers)                            \
+  X(PFNGLCLEARBUFFERFVPROC, glClearBufferfv)                        \
   X(PFNGLCHECKFRAMEBUFFERSTATUSPROC, glCheckFramebufferStatus)      \
   X(PFNGLBLITFRAMEBUFFERPROC, glBlitFramebuffer)                    \
   /* GPU timer queries */                                           \

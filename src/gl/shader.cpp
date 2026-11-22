@@ -216,6 +216,10 @@ void ShaderProgram::set(const char* n, float v) { glUniform1f(location(n), v); }
 void ShaderProgram::set(const char* n, const glm::vec2& v) { glUniform2f(location(n), v.x, v.y); }
 void ShaderProgram::set(const char* n, const glm::vec3& v) { glUniform3f(location(n), v.x, v.y, v.z); }
 void ShaderProgram::set(const char* n, const glm::vec4& v) { glUniform4f(location(n), v.x, v.y, v.z, v.w); }
+void ShaderProgram::set(const char* n, const glm::mat3& m) {
+  glUniformMatrix3fv(location(n), 1, GL_FALSE, glm::value_ptr(m));
+}
+
 void ShaderProgram::set(const char* n, const glm::mat4& m) {
   glUniformMatrix4fv(location(n), 1, GL_FALSE, glm::value_ptr(m));
 }

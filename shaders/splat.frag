@@ -6,12 +6,16 @@
 in vec2 vOffset;
 flat in vec4 vConicOpacity;
 flat in vec4 vColorDepth;
+flat in vec2 vDepthGrad;
 
 uniform int uDebugView;      // 0 = color, 1 = depth, 2 = overdraw, 3 = ellipse outlines
 uniform vec2 uDepthRange;    // (min, 1 / (max - min)) for the depth view
 uniform int uCountCoverage;  // benchmark: keep every rasterized fragment so a query can count them
 
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
+// Expected-depth output (Core 1): (z * alpha, alpha) blended with the same "over" operator gives
+// (sum w_i z_i, 1 - T). Ignored when the framebuffer has no second color attachment.
+layout(location = 1) out vec4 fragDepth;
 
 // Compact "turbo"-like colormap for debug views.
 vec3 heat(float t) {
@@ -20,6 +24,7 @@ vec3 heat(float t) {
 }
 
 void main() {
+    fragDepth = vec4(0.0);
     if (uCountCoverage != 0) {        // counted by a GL_SAMPLES_PASSED query, contributes nothing
         fragColor = vec4(0.0);
         return;
@@ -46,4 +51,7 @@ void main() {
         return;
     }
     fragColor = vec4(color * alpha, alpha);
+    // per-pixel depth; clamped so a nearly edge-on splat (huge gradient) cannot fling depth around
+    float z = clamp(vColorDepth.a + dot(vDepthGrad, d), 0.5 * vColorDepth.a, 2.0 * vColorDepth.a);
+    fragDepth = vec4(z * alpha, alpha, 0.0, alpha);
 }

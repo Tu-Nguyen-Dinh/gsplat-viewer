@@ -82,3 +82,24 @@ GPU LSD radix sort, per 4-bit digit:
    round (Hillis–Steele scan of one-hot flags, two 16-bit counters packed per `uint`).
 
 Every term preserves input order, so each pass is stable — the requirement for LSD radix sort.
+
+## Per-pixel depth of a splat (Core 1)
+
+In camera space a splat is a Gaussian N(t, S). The linearized projection maps an offset Δt to a
+screen offset Δu = J Δt, with J the 2×3 Jacobian of the EWA projection, and to a depth change
+Δz = −e_zᵀ Δt. (u, z) are then jointly Gaussian, and the expected depth along the ray through the
+pixel at offset Δu from the centre is the conditional mean
+
+    E[z | u] = z₀ + g·Δu,   g = Σ_uu⁻¹ Cov(z, u),   Σ_uu = J S Jᵀ,   Cov(z, u) = −e_zᵀ S Jᵀ.
+
+Σ_uu must be the covariance **without** the 0.3 px² anti-aliasing dilation (the dilation blurs the
+footprint, not the surface). The fragment shader blends (z·α, α) like the color, so the second render
+target holds Σ wᵢ zᵢ and 1 − T: the expected depth of the composite is their ratio.
+
+## Merging Gaussians (Core 2, LOD)
+
+Weights wᵢ = αᵢ det(Σᵢ)^⅓. The merged Gaussian keeps the first two moments of the weighted mixture:
+
+    μ = Σ wᵢ μᵢ / W,      Σ = Σ wᵢ (Σᵢ + (μᵢ − μ)(μᵢ − μ)ᵀ) / W.
+
+Scale and rotation come back from the eigen-decomposition Σ = R diag(s²) Rᵀ.

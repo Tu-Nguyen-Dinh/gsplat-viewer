@@ -17,6 +17,8 @@ struct Options {
   std::string blendFormat = "rgba16f";  // --blend: rgba8 (v1, fastest) | rgb10a2 | rgba16f (most precise)
   bool points = false;         // start in point mode
   int width = 1600, height = 900;
+  // Given on the command line: they win over the saved settings (core/settings.h).
+  bool sizeGiven = false, shGiven = false, backgroundGiven = false;
   float yaw = -1000.0f;        // camera yaw in radians (default: keep the camera's)
   int shDegree = 3;
   bool noCompress = false;      // --no-compress: 64-byte fp32 splats instead of the 24-byte format
@@ -42,6 +44,13 @@ struct Options {
   bool hasCropSphere = false;      // --crop-sphere x,y,z,r: delete everything outside (display space)
   float cropSphere[4] = {0, 0, 0, 1};
   std::string saveEdited;          // --save-edited out.ply: write the edited scene
+  // Core 1-3 layers (docs/core): a LAS point cloud shown with the splats, measuring, LOD.
+  std::string las;                 // --las FILE: point-cloud layer (opaque, occludes splats)
+  int lasStride = 1;               // --las-stride N: keep every N-th point (previews of huge scans)
+  bool hasLasTransform = false;    // --las-transform s,qw,qx,qy,qz,tx,ty,tz: LAS world -> scene coordinates
+  double lasTransform[8] = {1, 1, 0, 0, 0, 0, 0, 0};
+  long long lodBudget = 0;         // --lod N: draw at most N splats chosen by the LOD cut (0 = off)
+  float lodPixelError = 1.5f;      // --lod-error PX
 };
 
 // Returns false (and prints usage) on invalid arguments.

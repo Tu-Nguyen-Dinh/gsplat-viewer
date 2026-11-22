@@ -18,7 +18,8 @@ struct Splat2D {
 };
 }  // namespace
 
-Image renderReference(const GaussianScene& scene, const RenderView& view, const ReferenceOptions& o) {
+Image renderReference(const GaussianScene& scene, const RenderView& view, const ReferenceOptions& o,
+                      ReferenceDepth* depthOut) {
   ProjectionParams p;
   p.view = view.view * view.model;
   p.viewport = glm::vec2(view.viewport);
@@ -52,6 +53,7 @@ Image renderReference(const GaussianScene& scene, const RenderView& view, const 
   // 3. Composite in float, rows bottom-up like OpenGL.
   const int W = view.viewport.x, H = view.viewport.y;
   std::vector<glm::vec3> image(static_cast<size_t>(W) * H, o.background);
+  std::vector<glm::vec2> zAcc(depthOut ? static_cast<size_t>(W) * H : 0, glm::vec2(0.0f));  // (sum w z, 1 - T)
   for (const Splat2D& s : splats) {
     const ProjectedGaussian& g = s.g;
     // Pixels a GPU quad would touch: the oriented rectangle or the axis-aligned square.
@@ -75,8 +77,26 @@ Image renderReference(const GaussianScene& scene, const RenderView& view, const 
         if (alpha < 1.0f / 255.0f) continue;
         glm::vec3& c = image[static_cast<size_t>(y) * W + x];
         c = alpha * s.color + (1.0f - alpha) * c;  // "over" operator, back to front
+        if (depthOut) {
+          glm::vec2& z = zAcc[static_cast<size_t>(y) * W + x];
+          z = alpha * glm::vec2(g.depth, 1.0f) + (1.0f - alpha) * z;
+        }
       }
     }
+  }
+
+  if (depthOut) {
+    depthOut->width = W;
+    depthOut->height = H;
+    depthOut->depth.assign(static_cast<size_t>(W) * H, 0.0f);
+    depthOut->coverage.assign(static_cast<size_t>(W) * H, 0.0f);
+    for (int y = 0; y < H; ++y)
+      for (int x = 0; x < W; ++x) {
+        const glm::vec2 z = zAcc[static_cast<size_t>(H - 1 - y) * W + x];
+        const size_t i = static_cast<size_t>(y) * W + x;
+        depthOut->coverage[i] = z.y;
+        depthOut->depth[i] = z.y > 1e-6f ? z.x / z.y : 0.0f;
+      }
   }
 
   // 4. Quantize to 8 bits, flip to top-down rows.

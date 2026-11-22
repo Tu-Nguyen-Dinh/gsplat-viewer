@@ -34,6 +34,19 @@ struct SplatSettings {
   int depthKeyBits = 32;         // 32: exact float depth (8 passes); 24: top 24 float bits (6); 16: linear in range (4)
   DebugView debugView = DebugView::Color;
   bool countCoverage = false;    // benchmark only: shade every rasterized fragment (no discard)
+  // Test splats against the bound depth buffer (written by opaque layers drawn first). Splats never
+  // write depth. Needs a target with a depth buffer (Framebuffer::Attachments::depthBuffer).
+  bool depthTest = false;
+  // Per-pixel depth in the depth output (Framebuffer::Attachments::depthOutput): splats are tilted
+  // surfaces, so their depth varies across the ellipse. Costs 8 bytes per splat written + read.
+  // Off: the depth output still gets each splat's centre depth.
+  bool depthOutput = false;
+  // Colour of selected splats (setSelectionFlags bit 0): rgb, mixed in by a.
+  glm::vec4 highlight{1.0f, 0.55f, 0.1f, 0.6f};
+  // Live preview: splats with selection flag bit 0 are drawn transformed by previewAffine (scene
+  // space; rotation * uniform scale + translation). The data is not changed (gizmo drags).
+  bool previewActive = false;
+  glm::mat4 previewAffine{1.0f};
 };
 
 struct SplatStats {
@@ -64,6 +77,14 @@ class SplatRenderer {
   void setCompressed(bool compressed) { compressed_ = compressed; }
   bool compressed() const { return compressed_; }
   void upload(const GaussianScene& scene);
+  // Per-splat edit flags in SCENE order (one byte per splat): bit 0 selected (drawn with the
+  // highlight colour), bit 1 hidden (culled). Must have scene.size() entries; upload() clears them.
+  // Cost: one 1-byte upload per splat, re-ordered to GPU order on the CPU.
+  void setSelectionFlags(const std::vector<uint8_t>& sceneFlags);
+  void clearSelectionFlags() { hasFlags_ = false; }
+  bool hasSelectionFlags() const { return hasFlags_; }
+  // GPU splat k is scene splat gpuToScene()[k] (Morton order for the compressed format).
+  const std::vector<uint32_t>& gpuToScene() const { return gpuToScene_; }
   void render(const RenderView& view, const SplatSettings& settings);
 
   const SplatStats& stats() const { return stats_; }
@@ -111,6 +132,10 @@ class SplatRenderer {
   GlBuffer order_;        // uint[count]  visible splat indices, in draw order
   GlBuffer sortKeys_;     // uint[count]  depth keys of the visible splats
   GlBuffer drawCommand_;  // DrawCommand (indirect draw arguments)
+  GlBuffer depthGrad_;    // vec2[count], only allocated when depthOutput is used
+  GlBuffer flags_;        // uint[(count + 3) / 4] edit flags, GPU order
+  std::vector<uint32_t> gpuToScene_;
+  bool hasFlags_ = false;
 
   uint32_t count_ = 0;
   int sceneShDegree_ = 0;

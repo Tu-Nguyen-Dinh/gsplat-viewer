@@ -5,18 +5,24 @@
 
 layout(std430, binding = BINDING_PROJECTED) readonly buffer Projected { ProjectedSplat projected[]; };
 layout(std430, binding = BINDING_ORDER)     readonly buffer Order     { uint order[]; };
+layout(std430, binding = BINDING_DEPTH_GRAD) readonly buffer DepthGrad { vec2 depthGrad[]; };
 
 #include "include/gaussian.glsl"
 
 uniform vec2 uViewport;
 uniform int uOrientedQuads;   // 1: rectangle aligned with the ellipse axes, 0: square of side 2*radius
+uniform int uDepthGrad;       // 1: per-pixel depth from the screen-space depth gradient
+uniform vec2 uProjZ;          // (P[2][2], P[3][2]) of the projection: NDC z of the splat center, so
+                              // opaque layers in the depth buffer can occlude splats (depth test)
 
 out vec2 vOffset;                    // pixel offset from the splat center
 flat out vec4 vConicOpacity;
 flat out vec4 vColorDepth;           // rgb = color, a = depth (debug views)
+flat out vec2 vDepthGrad;            // depth change per pixel of offset (0 unless uDepthGrad)
 
 void main() {
-    ProjectedSplat s = projected[order[gl_InstanceID]];
+    uint index = order[gl_InstanceID];
+    ProjectedSplat s = projected[index];
     if (s.bits.w == 0u) {                        // culled (only happens with CPU ordering)
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);  // outside the clip volume: no fragments
         return;
@@ -38,8 +44,13 @@ void main() {
                                       : corner * ceil(length(axisMajor) * shrink);
     vec2 pixel = s.centerConic.xy + offset;
 
-    gl_Position = vec4(pixel / uViewport * 2.0 - 1.0, 0.0, 1.0);
+    float depth = uintBitsToFloat(s.bits.y);
+    // Perspective: clip.z = P22 * z_view + P32 with z_view = -depth, clip.w = depth. Clamped so far
+    // splats are never clipped (they were drawn at z = 0 before depth testing existed).
+    float ndcZ = clamp((uProjZ.y - uProjZ.x * depth) / max(depth, 1e-6), -1.0, 1.0);
+    gl_Position = vec4(pixel / uViewport * 2.0 - 1.0, ndcZ, 1.0);
     vOffset = offset;
     vConicOpacity = vec4(conic, opacity);
     vColorDepth = vec4(rg, bo.x, uintBitsToFloat(s.bits.y));
+    vDepthGrad = uDepthGrad != 0 ? depthGrad[index] : vec2(0.0);
 }

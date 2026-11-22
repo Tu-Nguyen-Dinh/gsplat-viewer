@@ -14,6 +14,8 @@ layout(std430, binding = BINDING_PROJECTED) writeonly buffer Projected { Project
 layout(std430, binding = BINDING_ORDER)     writeonly buffer Order     { uint order[]; };
 layout(std430, binding = BINDING_DRAW_CMD)  buffer DrawCmd   { DrawCommand drawCmd; };
 layout(std430, binding = BINDING_SORT_KEYS) writeonly buffer SortKeys  { uint sortKeys[]; };
+layout(std430, binding = BINDING_DEPTH_GRAD) writeonly buffer DepthGrad { vec2 depthGrad[]; };
+layout(std430, binding = BINDING_FLAGS)      readonly buffer Flags     { uint flagWords[]; };
 
 #include "include/gaussian.glsl"
 #include "include/spherical_harmonics.glsl"
@@ -35,6 +37,15 @@ uniform uint uRestPerChannel;
 // (uShCount, the plane stride of shData, is declared in spherical_harmonics.glsl)
 uniform vec2 uDepthRange;    // (min, 1 / (max - min)) for 16-bit sort keys
 uniform int uKeyBits;        // 16, 24 or 32
+uniform int uDepthGrad;      // 1: write depthGrad[] (per-pixel depth output requested)
+uniform int uFlags;          // 1: flagWords[] holds edit flags (selection highlight, hidden splats)
+uniform vec4 uHighlight;     // rgb: colour of selected splats, a: how much of it is mixed in
+// Live transform preview (gizmo drag): selected splats are drawn moved by uPreviewAffine (scene
+// space, rotation * uniform scale + translation) without touching their data. Colours stay right by
+// evaluating the SH at the direction rotated back (uPreviewRotT = R^T), not by rotating coefficients.
+uniform int uPreview;
+uniform mat4 uPreviewAffine;
+uniform mat3 uPreviewRotT;
 
 // Sort key such that ASCENDING order = FAR to NEAR (back-to-front drawing).
 uint depthKey(float depth) {
@@ -75,20 +86,30 @@ void main() {
         cov = unpackCovariance(s.cov0, s.cov1);
     }
 
+    uint flags = uFlags != 0 ? (flagWords[i >> 2u] >> (8u * (i & 3u))) & 0xFFu : 0u;
+    bool moved = uPreview != 0 && (flags & 1u) != 0u;
+    if (moved) {
+        mat3 a = mat3(uPreviewAffine);
+        mean = (uPreviewAffine * vec4(mean, 1.0)).xyz;
+        cov = a * cov * transpose(a);
+    }
     Projection p = projectGaussian(mean, cov, uView, uViewport, uFocal, uPrincipal, uTanHalfFov, uNear, uSplatScale,
                                    uCull != 0);
-    if (!p.visible || opacity < 1.0 / 255.0) {
+    if (!p.visible || opacity < 1.0 / 255.0 || (flags & 2u) != 0u) {
         projected[i].bits = uvec4(0u);  // w == 0: culled (only read with CPU ordering)
         return;
     }
 
     vec3 dir = normalize(mean - uCameraPos);
+    if (moved) dir = uPreviewRotT * dir;
     vec3 color = evalSphericalHarmonics(uShDegree, dir, dc, i, uRestPerChannel);
+    if ((flags & 1u) != 0u) color = mix(color, uHighlight.rgb, uHighlight.a);
 
     // 32 bytes: center and conic in fp32 (pixel positions need it), color and opacity in fp16.
     projected[i].centerConic = vec4(p.center, p.conic.xy);
     projected[i].bits = uvec4(floatBitsToUint(p.conic.z), floatBitsToUint(p.depth), packHalf2x16(color.rg),
                               packHalf2x16(vec2(color.b, opacity)));
+    if (uDepthGrad != 0) depthGrad[i] = p.depthGradient;
 
     // Append to the visible list. The counter doubles as the instance count of the indirect draw.
     uint slot = atomicAdd(drawCmd.instanceCount, 1u);

@@ -9,6 +9,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <vector>
 
@@ -30,7 +31,8 @@ struct DrawCommand {
 };
 
 constexpr GLuint kBindSplats = 0, kBindShRest = 1, kBindProjected = 2, kBindOrder = 3, kBindDrawCmd = 4,
-                 kBindSortKeys = 5, kBindPacked = 6, kBindChunks = 7;
+                 kBindSortKeys = 5, kBindPacked = 6, kBindChunks = 7, kBindDepthGrad = 8,
+                 kBindFlags = 9;
 constexpr unsigned kPreprocessGroup = 256;
 
 }  // namespace
@@ -137,6 +139,10 @@ void SplatRenderer::upload(const GaussianScene& scene) {
   cpuOrderValid_ = false;
   sortKeys_.allocate(scene.size() * sizeof(uint32_t));
 
+  gpuToScene_ = std::move(order);
+  hasFlags_ = false;
+  flags_.allocate(sizeof(uint32_t), nullptr, GL_DYNAMIC_DRAW);  // SSBOs may not be empty
+
   boundsCenter_ = 0.5f * (scene.boundsMin + scene.boundsMax);
   boundsRadius_ = std::max(0.5f * glm::length(scene.boundsMax - scene.boundsMin), 1e-3f);
   stats_ = {};
@@ -144,6 +150,27 @@ void SplatRenderer::upload(const GaussianScene& scene) {
   stats_.uploadSceneMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   stats_.gpuMemoryBytes = splats_.size() + packed_.size() + chunks_.size() + shRest_.size() + projected_.size() +
                           order_.size() + sortKeys_.size();
+}
+
+void SplatRenderer::setSelectionFlags(const std::vector<uint8_t>& sceneFlags) {
+  if (sceneFlags.size() != gpuToScene_.size()) {
+    hasFlags_ = false;
+    return;
+  }
+  std::vector<uint32_t> words((gpuToScene_.size() + 3) / 4, 0u);
+  bool any = false;
+  for (size_t k = 0; k < gpuToScene_.size(); ++k) {
+    const uint32_t f = sceneFlags[gpuToScene_[k]];
+    if (!f) continue;
+    words[k >> 2] |= (f & 0xFFu) << (8u * (k & 3u));
+    any = true;
+  }
+  hasFlags_ = any;
+  if (!any) return;
+  if (flags_.size() < words.size() * sizeof(uint32_t))
+    flags_.allocate(words.size() * sizeof(uint32_t), words.data(), GL_DYNAMIC_DRAW);
+  else
+    flags_.upload(0, words.size() * sizeof(uint32_t), words.data());
 }
 
 void SplatRenderer::preprocess(const RenderView& view, const SplatSettings& settings) {
@@ -162,6 +189,10 @@ void SplatRenderer::preprocess(const RenderView& view, const SplatSettings& sett
   order_.bindBase(GL_SHADER_STORAGE_BUFFER, kBindOrder);
   drawCommand_.bindBase(GL_SHADER_STORAGE_BUFFER, kBindDrawCmd);
   sortKeys_.bindBase(GL_SHADER_STORAGE_BUFFER, kBindSortKeys);
+  if (settings.depthOutput) {
+    if (depthGrad_.size() < static_cast<size_t>(count_) * 8u) depthGrad_.reserve(static_cast<size_t>(count_) * 8u);
+    depthGrad_.bindBase(GL_SHADER_STORAGE_BUFFER, kBindDepthGrad);
+  }
 
   preprocess_.use();
   preprocess_.set("uCount", count_);
@@ -182,6 +213,18 @@ void SplatRenderer::preprocess(const RenderView& view, const SplatSettings& sett
   preprocess_.set("uDepthRange", depthRange_);
   const int keyBits = settings.depthKeyBits == 16 ? 16 : settings.depthKeyBits == 24 ? 24 : 32;
   preprocess_.set("uKeyBits", keyBits);
+  preprocess_.set("uDepthGrad", settings.depthOutput ? 1 : 0);
+  flags_.bindBase(GL_SHADER_STORAGE_BUFFER, kBindFlags);
+  preprocess_.set("uFlags", hasFlags_ ? 1 : 0);
+  preprocess_.set("uHighlight", settings.highlight);
+  preprocess_.set("uPreview", settings.previewActive && hasFlags_ ? 1 : 0);
+  if (settings.previewActive) {
+    const glm::mat3 m(settings.previewAffine);
+    const float det = glm::determinant(m);
+    const float sc = std::cbrt(det > 0.0f ? det : 1.0f);
+    preprocess_.set("uPreviewAffine", settings.previewAffine);
+    preprocess_.set("uPreviewRotT", glm::transpose(m / sc));
+  }
   preprocess_.dispatch1D(count_, kPreprocessGroup);
 
   // The draw reads the SSBOs in the vertex shader and the counter as indirect arguments.
@@ -189,7 +232,12 @@ void SplatRenderer::preprocess(const RenderView& view, const SplatSettings& sett
 }
 
 void SplatRenderer::draw(const RenderView& view, const SplatSettings& settings) {
-  glDisable(GL_DEPTH_TEST);
+  if (settings.depthTest) {
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+  } else {
+    glDisable(GL_DEPTH_TEST);
+  }
   glDepthMask(GL_FALSE);
   glEnable(GL_BLEND);
   if (settings.debugView == DebugView::Overdraw)
@@ -202,12 +250,15 @@ void SplatRenderer::draw(const RenderView& view, const SplatSettings& settings) 
   const bool cpuOrder = settings.sort == SortMode::CpuStd || settings.sort == SortMode::CpuRadix;
   projected_.bindBase(GL_SHADER_STORAGE_BUFFER, kBindProjected);
   (cpuOrder ? cpuOrderBuffer_ : order_).bindBase(GL_SHADER_STORAGE_BUFFER, kBindOrder);
+  if (settings.depthOutput) depthGrad_.bindBase(GL_SHADER_STORAGE_BUFFER, kBindDepthGrad);
   draw_.use();
   draw_.set("uViewport", glm::vec2(view.viewport));
   draw_.set("uOrientedQuads", settings.orientedQuads ? 1 : 0);
   draw_.set("uDebugView", static_cast<int>(settings.debugView));
   draw_.set("uDepthRange", depthRange_);
   draw_.set("uCountCoverage", settings.countCoverage ? 1 : 0);
+  draw_.set("uDepthGrad", settings.depthOutput ? 1 : 0);
+  draw_.set("uProjZ", glm::vec2(view.projection[2][2], view.projection[3][2]));
 
   glBindVertexArray(vao_);
   if (cpuOrder) {
@@ -220,6 +271,8 @@ void SplatRenderer::draw(const RenderView& view, const SplatSettings& settings) 
   glBindVertexArray(0);
 
   glDisable(GL_BLEND);
+  glDisable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LESS);
   glDepthMask(GL_TRUE);
 }
 

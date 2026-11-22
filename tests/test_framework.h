@@ -19,6 +19,10 @@ struct Case {
 
 std::vector<Case>& registry();
 void reportFailure(const char* file, int line, const std::string& message);
+// True when the current OpenGL context is a CPU rasterizer (Mesa llvmpipe/softpipe, SwiftShader).
+// Such drivers are exact where real GPUs round (e.g. 8-bit blending), so the few checks that
+// measure a hardware effect are reported instead of asserted there. Always false without GL.
+bool softwareRenderer();
 
 struct Registrar {
   Registrar(const char* name, bool gpu, void (*fn)()) { registry().push_back({name, gpu, fn}); }

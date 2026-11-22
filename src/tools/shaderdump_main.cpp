@@ -28,7 +28,8 @@ int main(int argc, char** argv) {
   std::filesystem::create_directories(out, ec);
 
   // Every program stage the renderers load (file name = stage for glslc: .vert / .frag / .comp).
-  static const char* kStages[] = {"points.vert",           "points.frag",          "splat.vert",
+  static const char* kStages[] = {"points.vert",           "points.frag",          "cloud.vert",
+                                  "cloud.frag",            "splat.vert",
                                   "splat.frag",            "splat_preprocess.comp", "radix_histogram.comp",
                                   "radix_scatter.comp",    "scan_local.comp",       "scan_add.comp"};
   int failures = 0;

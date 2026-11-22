@@ -2,6 +2,8 @@
 
 #include "gl/framebuffer.h"
 #include "gl/gl_loader.h"
+#include "core/i18n.h"
+#include "core/utf8_path.h"
 #include "scene/demo_scene.h"
 #include "scene/ply_io.h"
 
@@ -15,6 +17,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <cstdio>
@@ -75,11 +78,21 @@ bool App::createWindow(const Options& o) {
   // They must be set before ImGui installs its own, which chain to ours.
   glfwSetWindowUserPointer(window_, this);
   glfwSetDropCallback(window_, onDrop);
+  glfwSetWindowCloseCallback(window_, onWindowClose);  // unsaved changes: ask first (session_ui.cpp)
   glfwSetScrollCallback(window_, onScroll);
+  glfwSetMouseButtonCallback(window_, onMouseButton);
+  // Sticky input: a key or button tapped between two frames still reads as pressed once. Heavy
+  // scenes can drop to a few FPS, where polling alone lost quick taps (tool keys, Delete...).
+  glfwSetInputMode(window_, GLFW_STICKY_KEYS, GLFW_TRUE);
+  glfwSetInputMode(window_, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGui::StyleColorsDark();
+  // Window layout next to the settings, not in the current folder (it littered repositories).
+  static std::string iniPath;
+  iniPath = pathToUtf8(pathFromUtf8(settingsDirectory()) / "imgui.ini");
+  ImGui::GetIO().IniFilename = iniPath.c_str();
   ImGui_ImplGlfw_InitForOpenGL(window_, true);
   ImGui_ImplOpenGL3_Init("#version 430");
   return true;
@@ -87,6 +100,19 @@ bool App::createWindow(const Options& o) {
 
 void App::shutdown() {
   if (!window_) return;
+  if (interactive_) {
+    saveUserSettings();  // interactive runs only (screenshots / benchmarks keep the settings)
+    if (saveJob_.valid()) saveJob_.wait();  // a background save must finish before we exit
+    if (!recoveryPrompt_) clearRecovery();  // clean exit: nothing to recover next time
+    history_.clear();                       // deletes its files
+    std::error_code ec;
+    if (!historyDir_.empty()) std::filesystem::remove_all(pathFromUtf8(historyDir_), ec);
+  }
+  for (auto& kv : thumbTextures_) {
+    GLuint tex = kv.second;
+    if (tex) glDeleteTextures(1, &tex);
+  }
+  thumbTextures_.clear();
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplGlfw_Shutdown();
   ImGui::DestroyContext();
@@ -95,7 +121,22 @@ void App::shutdown() {
   window_ = nullptr;
 }
 
-int App::run(const Options& o) {
+int App::run(const Options& cmdLine) {
+  // Saved settings first; what the command line gives explicitly wins.
+  const bool interactive = cmdLine.screenshot.empty() && !cmdLine.benchmark && cmdLine.turntableDir.empty() &&
+                           cmdLine.flythroughDir.empty() && !cmdLine.evaluate;
+  Options o = cmdLine;
+  interactive_ = interactive;
+  if (interactive) {
+    loadUserSettings();
+    if (!o.sizeGiven) {
+      o.width = settings_.windowWidth;
+      o.height = settings_.windowHeight;
+    }
+    if (!o.shGiven) o.shDegree = settings_.shDegree;
+    if (!o.backgroundGiven) std::copy(settings_.background, settings_.background + 3, o.background);
+    vsync_ = settings_.vsync;
+  }
   options_ = o;
   flipY_ = o.flipY;
   blendFormat_ = o.blendFormat == "rgba8"     ? Framebuffer::Format::RGBA8
@@ -119,18 +160,50 @@ int App::run(const Options& o) {
     if (window_) shutdown();
     return 1;
   }
+  if (interactive) {
+    if (settings_.maximized && !o.sizeGiven) glfwMaximizeWindow(window_);
+    glfwSwapInterval(vsync_ ? 1 : 0);
+    checkRecoveryAtStartup();  // the last session crashed: offer its autosave
+    markProjectSaved();        // an empty project is "saved": nothing to lose yet
+    // Large undo steps go to disk (one folder per running viewer; old crash leftovers removed).
+    {
+      const std::filesystem::path root = pathFromUtf8(settingsDirectory()) / "history";
+      std::error_code ec;
+      for (const auto& e : std::filesystem::directory_iterator(root, ec)) {
+        const auto age = std::filesystem::file_time_type::clock::now() - e.last_write_time(ec);
+        if (!ec && age > std::chrono::hours(24)) std::filesystem::remove_all(e.path(), ec);
+      }
+      historyDir_ = pathToUtf8(root / std::to_string(currentProcessId()));
+      history_.setSpill(historyDir_);
+    }
+  }
 
   std::string log;
   bool ok = points_.init(log);
   std::string log2;
   ok = splats_.init(log2) && ok;
+  ok = cloudRenderer_.init(log2) && ok;
   if (!ok) {
     shaderLog_ = log + log2;
     std::fprintf(stderr, "%s\n", shaderLog_.c_str());
   }
 
+  lodBudget_ = o.lodBudget > 0 ? o.lodBudget : lodBudget_;
+  lodPixelError_ = o.lodPixelError;
+  if (o.hasLasTransform) {
+    const double* t = o.lasTransform;
+    cloudTransform_ = GeoFrame::fromQuaternion(glm::dquat(t[1], t[2], t[3], t[4]), {t[5], t[6], t[7]}, t[0]);
+    hasCloudTransform_ = true;
+  }
   if (!o.scene.empty()) pendingLoad_ = o.scene;
-  else setScene(makeDemoScene());
+  else if (!o.las.empty()) setScene(GaussianScene{});
+  else if (interactive) {  // no file: the welcome screen (open, recent files, demo)
+    setScene(GaussianScene{});
+    showWelcome_ = true;
+  } else {
+    setScene(makeDemoScene());  // screenshots / benchmarks without a file: the demo scene
+  }
+  if (!o.las.empty()) loadCloudFile(o.las);
 
   colmapOverride_ = o.colmapDir;
   if (o.benchmark || !o.turntableDir.empty() || !o.flythroughDir.empty() || o.evaluate) {
@@ -166,9 +239,26 @@ int App::run(const Options& o) {
     if (!pendingLoad_.empty()) {
       std::string path;
       path.swap(pendingLoad_);
-      loadSceneFile(path);
+      if (interactive_) openAnyFile(path);  // asks first when there are unsaved changes
+      else loadSceneFile(path);
+    }
+    if (interactive_) {
+      pollBackgroundJobs();
+      autosaveTick();
+      stepVideoExport();  // one video frame per loop iteration
+    }
+    if (!pendingProject_.empty()) {
+      std::string path;
+      path.swap(pendingProject_);
+      openAnyFile(path);
+    }
+    if (!pendingCloud_.empty()) {
+      std::string path;
+      path.swap(pendingCloud_);
+      loadCloudFile(path);
     }
     pollLoading();
+    updateLod();
 
     int fbW, fbH;
     glfwGetFramebufferSize(window_, &fbW, &fbH);
@@ -177,14 +267,32 @@ int App::run(const Options& o) {
       continue;
     }
 
+    if (showUi_ && fontsDirty_) setupFonts();  // between frames: the font atlas is rebuilt
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
     if (showUi_) {
       handleInput(dt, fbH);
+      drawMenuBar();
+      drawStatusBar();
       drawUi();
+      if (showCompass_ && !scene_.empty()) drawCompass();
+      drawToolOverlay(makeRenderView(fbW, fbH));
+      drawWelcome();
+      drawShortcuts();
+      drawPathPrompt();
+      drawConfirmDiscard();
+      drawExportProgress();
+      drawRecoveryPrompt();
+      if (!settings_.firstRunDone && !tourOffered_ && !showWelcome_ && !scene_.empty() && !isLoading()) {
+        tourOffered_ = true;  // first start: the 5-step tour once a scene is visible
+        tourStep_ = 0;
+      }
+      drawTour();
     }
-    frame(0, fbW, fbH);
+    if (interactive_ && showUi_) renderMainView(fbW, fbH, dt);  // auto quality while moving
+    else frame(0, fbW, fbH);
+    if (showUi_) captureThumbnail();  // a few frames after a load: picture for the recent-files list
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
@@ -221,8 +329,9 @@ int App::run(const Options& o) {
 // --------------------------------------------------------------------------------------
 
 glm::mat4 App::modelMatrix() const {
-  if (hasOrientation_) return orientation_;  // known cameras: their average "up" becomes +Y
-  return flipY_ ? glm::rotate(glm::mat4(1.0f), glm::pi<float>(), glm::vec3(1, 0, 0)) : glm::mat4(1.0f);
+  // level_ (project "Level from selection") turns the user's floor horizontal on top of the base.
+  if (hasOrientation_) return level_ * orientation_;  // known cameras: their average "up" becomes +Y
+  return level_ * (flipY_ ? glm::rotate(glm::mat4(1.0f), glm::pi<float>(), glm::vec3(1, 0, 0)) : glm::mat4(1.0f));
 }
 
 RenderView App::makeRenderView(int w, int h) const {
@@ -240,19 +349,32 @@ RenderView App::makeRenderView(int w, int h) const {
 void App::frame(GLuint fbo, int fbW, int fbH) {
   // The window's back buffer is 8-bit: splats go through a half-float target first. Offscreen
   // targets are created in targetFormat() already, and points are opaque (rounding is harmless).
+  // A depth buffer is attached only while a point cloud is shown (it occludes splats). The
+  // expected-depth output is never attached here: blending a second RG32F target doubled the cost
+  // of every fragment (phong full screen, RTX 3060: draw 36.6 ms vs 5.8 ms). Picking renders one
+  // frame into its own target instead (pickMeasurePoint).
+  const bool drawCloud = haveCloud_ && showCloud_;
   const bool viaTarget = fbo == 0 && blendFormat_ != Framebuffer::Format::RGBA8 && mode_ == RenderMode::Splats;
-  if (viaTarget && (sceneTarget_.width() != fbW || sceneTarget_.height() != fbH || sceneTarget_.format() != blendFormat_))
-    sceneTarget_.create(fbW, fbH, blendFormat_);
+  if (viaTarget && (sceneTarget_.width() != fbW || sceneTarget_.height() != fbH || sceneTarget_.format() != blendFormat_ ||
+                    sceneTarget_.attachments().depthBuffer != drawCloud))
+    sceneTarget_.create(fbW, fbH, blendFormat_, {false, drawCloud});
   glBindFramebuffer(GL_FRAMEBUFFER, viaTarget ? sceneTarget_.id() : fbo);
   glViewport(0, 0, fbW, fbH);
   glClearColor(background_.r, background_.g, background_.b, 1.0f);
+  glDepthMask(GL_TRUE);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  if (viaTarget) sceneTarget_.clear(background_);
 
   const RenderView view = makeRenderView(fbW, fbH);
+  if (drawCloud) cloudRenderer_.draw(view, cloudToDisplay(), glm::dvec3(0.0), cloudSettings_);
   if (mode_ == RenderMode::Splats) {
-    splats_.render(view, splatSettings_);
+    syncSelectionFlags();  // selection highlight / hidden splats (tools_ui.cpp)
+    SplatSettings s = splatSettings_;
+    s.depthTest = drawCloud;
+    splats_.render(view, s);
     if (viaTarget) {  // one conversion to 8 bits at the end, like the trainer
       glBindFramebuffer(GL_READ_FRAMEBUFFER, sceneTarget_.id());
+      glReadBuffer(GL_COLOR_ATTACHMENT0);
       glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
       glBlitFramebuffer(0, 0, fbW, fbH, 0, 0, fbW, fbH, GL_COLOR_BUFFER_BIT, GL_NEAREST);
       glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -275,13 +397,22 @@ void App::frame(GLuint fbo, int fbW, int fbH) {
 // --------------------------------------------------------------------------------------
 
 void App::setScene(GaussianScene&& scene) {
+  setLodEnabled(false);  // the LOD tree belongs to the previous scene
+  lodTree_ = {};
+  finishLiveEdit(false);
   scene_ = std::move(scene);
   points_.upload(scene_);
   splats_.upload(scene_);
   frameScene();
   // A new scene: forget the edit state of the previous one.
-  undoScene_ = {};
-  undoLabel_.clear();
+  history_.clear();
+  savedRevision_ = history_.revision();  // a freshly loaded scene has nothing to save
+  autosavedRevision_ = savedRevision_;
+  editTreeValid_ = false;
+  selected_.assign(scene_.size(), 0);
+  hidden_.assign(scene_.size(), 0);
+  selectionChanged();
+  measureDraft_.clear();
   scenePath_.clear();  // pollLoading() sets it for files; the demo scene has none
   savePath_[0] = 0;
   resetSelection();
@@ -292,7 +423,7 @@ void App::setScene(GaussianScene&& scene) {
 
 void App::loadSceneFile(const std::string& utf8Path) {
   if (isLoading()) {
-    status_ = "Already loading " + loadingName_;
+    status_ = std::string(tr("Already loading ")) + loadingName_;
     return;
   }
   // Parsing a large file takes seconds: do it on a worker thread so the window
@@ -307,27 +438,57 @@ void App::pollLoading() {
   if (!isLoading() || loading_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
   LoadResult r = loading_.get();  // leaves the future invalid -> isLoading() == false
   if (!r.ok) {
-    status_ = "Load failed: " + r.error;
+    status_ = std::string(tr("Load failed: ")) + r.error;
     return;
   }
-  loadColmapFor(loadingName_, colmapOverride_);  // before setScene: framing uses the orientation
+  // Before setScene: framing uses the orientation. A recovered autosave uses its original's cameras.
+  loadColmapFor(recoverOriginalPath_.empty() ? loadingName_ : recoverOriginalPath_, colmapOverride_);
   const auto t0 = std::chrono::steady_clock::now();
   setScene(std::move(r.scene));  // GPU upload: must run on the thread that owns the GL context
   scenePath_ = loadingName_;
+  const bool recovered = !recoverOriginalPath_.empty();
+  if (recovered) {  // recovered autosave: show and save it under the original file's name
+    scenePath_ = recoverOriginalPath_;
+    scene_.sourceName = pathToUtf8(pathFromUtf8(scenePath_).filename());
+    recoverOriginalPath_.clear();
+  }
+  if (interactive_ && !hasOrientation_) {  // Flip Y is remembered per file (settings)
+    std::error_code ec;
+    const std::string abs = pathToUtf8(std::filesystem::absolute(pathFromUtf8(scenePath_), ec));
+    const bool want = (options_.flipY && scenePath_ == options_.scene) || isFlipY(settings_, ec ? scenePath_ : abs);
+    if (want != flipY_) {
+      flipY_ = want;
+      frameScene();
+    }
+  }
+  if (recovered) {
+    savedRevision_ = ~uint64_t(0);  // recovered work stays "unsaved" until the user saves it
+  } else {
+    rememberRecent(scenePath_);
+  }
+  thumbnailPending_ = true;
+  thumbnailDelay_ = 5;
+  showWelcome_ = false;
   applyBatchEdits();
   const double uploadMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   loadMs_ = r.milliseconds + uploadMs;
   // A captured scene is only well reconstructed from where the phone was: framing its bounds from
   // outside shows the floaters around it, so start at the first training camera (F frames all).
   if (!colmap_.images.empty() && !fixedCamera_) goToCamera(0);
+  if (options_.lodBudget > 0) setLodEnabled(true);
   char buf[256];
-  std::snprintf(buf, sizeof(buf), "Loaded %zu splats (parse %.0f ms, upload %.0f ms)%s", scene_.size(),
-                r.milliseconds, uploadMs, r.removedInvalid ? ", removed invalid splats: " : "");
+  std::snprintf(buf, sizeof(buf), tr("Loaded %zu splats (parse %.0f ms, upload %.0f ms)%s"), scene_.size(),
+                r.milliseconds, uploadMs, r.removedInvalid ? tr(", removed invalid splats: ") : "");
   status_ = buf;
   if (r.removedInvalid) status_ += std::to_string(r.removedInvalid);
+  if (recovered) status_ = tr("Recovered the autosaved session: save it to keep it");
 }
 
 void App::frameScene() {
+  if (scene_.empty() && haveCloud_) {
+    frameCloud();
+    return;
+  }
   // Frame the dense subject (scene_bounds.cpp), not the background and floaters around it.
   // The model matrix only rotates, so the radius is unchanged.
   const glm::vec3 center = glm::vec3(modelMatrix() * glm::vec4(scene_.focusCenter, 1.0f));
@@ -374,14 +535,14 @@ void App::goToCamera(int index) {
     const glm::dvec4 k = cam->pinhole();
     if (k.y > 0.0) camera_.fovY = static_cast<float>(2.0 * std::atan(0.5 * cam->height / k.y));  // match the photo
   }
-  status_ = "Camera " + std::to_string(cameraIndex_ + 1) + " / " + std::to_string(n) + ": " + im.name;
+  status_ = std::string(tr("Camera ")) + std::to_string(cameraIndex_ + 1) + " / " + std::to_string(n) + ": " + im.name;
 }
 
 void App::reloadShaders() {
   std::string a, b;
   const bool ok = points_.reloadShaders(a) & splats_.reloadShaders(b);
   shaderLog_ = ok ? "" : a + b;
-  status_ = ok ? "Shaders reloaded" : "Shader error (previous shaders kept)";
+  status_ = ok ? tr("Shaders reloaded") : tr("Shader error (previous shaders kept)");
 }
 
 // --------------------------------------------------------------------------------------
@@ -389,7 +550,39 @@ void App::reloadShaders() {
 // --------------------------------------------------------------------------------------
 
 void App::onDrop(GLFWwindow* w, int count, const char** paths) {
-  if (count > 0) appFrom(w)->pendingLoad_ = paths[0];
+  for (int i = 0; i < count; ++i) {
+    std::string p = paths[i];
+    std::string ext = p.size() >= 4 ? p.substr(p.size() - 4) : "";
+    for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    const bool project = p.size() >= 8 && [&] {
+      std::string e = p.substr(p.size() - 8);
+      for (char& c : e) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      return e == ".gsvproj";
+    }();
+    if (project) appFrom(w)->pendingProject_ = p;
+    else if (ext == ".las" || ext == ".laz") appFrom(w)->pendingCloud_ = p;
+    else appFrom(w)->pendingLoad_ = p;
+  }
+}
+
+void App::onMouseButton(GLFWwindow* w, int button, int action, int) {
+  if (button != GLFW_MOUSE_BUTTON_LEFT) return;
+  App* app = appFrom(w);
+  double x, y;
+  glfwGetCursorPos(w, &x, &y);
+  if (action == GLFW_PRESS) {
+    app->pressPending_ = !ImGui::GetIO().WantCaptureMouse;  // a click on the panel is not a pick
+    app->pressX_ = x;
+    app->pressY_ = y;
+  } else if (action == GLFW_RELEASE && app->pressPending_) {
+    app->pressPending_ = false;
+    // A click, not a drag (drags orbit): released within 4 px of the press.
+    if (std::abs(x - app->pressX_) + std::abs(y - app->pressY_) < 4.0) {
+      app->clickReady_ = true;
+      app->clickX_ = x;
+      app->clickY_ = y;
+    }
+  }
 }
 
 void App::onScroll(GLFWwindow* w, double, double y) {
@@ -397,6 +590,7 @@ void App::onScroll(GLFWwindow* w, double, double y) {
 }
 
 void App::handleInput(float dt, int fbHeight) {
+  updateCameraAnimation();  // nav_ui.cpp: smooth transitions, cancelled by any user camera input
   ImGuiIO& io = ImGui::GetIO();
   double x, y;
   glfwGetCursorPos(window_, &x, &y);
@@ -408,7 +602,19 @@ void App::handleInput(float dt, int fbHeight) {
     const bool lmb = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     const bool rmb = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
     const bool mmb = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS;
-    if (flyMode_) {  // LMB/RMB look around, MMB pan
+    // A click is a press and release without dragging (onMouseButton). Tools other than
+    // Navigate own the left button; the right button orbits and the middle button pans then.
+    const bool clicked = clickReady_;
+    clickReady_ = false;
+    const bool shift = glfwGetKey(window_, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+                       glfwGetKey(window_, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+    const bool alt = glfwGetKey(window_, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
+                     glfwGetKey(window_, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
+    if (tool_ != Tool::Navigate && !flyMode_) {
+      handleToolInput(lmb, x, y, clicked, shift, alt);
+      if (rmb) camera_.orbit(dx, dy);
+      if (mmb) camera_.pan(dx, dy, static_cast<float>(fbHeight));
+    } else if (flyMode_) {  // LMB/RMB look around, MMB pan
       if (lmb || rmb) camera_.look(dx, dy);
       if (mmb) camera_.pan(dx, dy, static_cast<float>(fbHeight));
     } else {         // LMB orbit, RMB/MMB pan
@@ -432,12 +638,16 @@ void App::handleInput(float dt, int fbHeight) {
   };
 
   glm::vec3 dir(0.0f);
-  if (down(GLFW_KEY_W)) dir.z += 1;
-  if (down(GLFW_KEY_S)) dir.z -= 1;
-  if (down(GLFW_KEY_D)) dir.x += 1;
-  if (down(GLFW_KEY_A)) dir.x -= 1;
-  if (down(GLFW_KEY_E)) dir.y += 1;
-  if (down(GLFW_KEY_Q)) dir.y -= 1;
+  // Ctrl+S / Ctrl+A / Ctrl+D are shortcuts, not camera moves.
+  const bool ctrlHeld = down(GLFW_KEY_LEFT_CONTROL) || down(GLFW_KEY_RIGHT_CONTROL);
+  if (!ctrlHeld) {
+    if (down(GLFW_KEY_W)) dir.z += 1;
+    if (down(GLFW_KEY_S)) dir.z -= 1;
+    if (down(GLFW_KEY_D)) dir.x += 1;
+    if (down(GLFW_KEY_A)) dir.x -= 1;
+    if (down(GLFW_KEY_E)) dir.y += 1;
+    if (down(GLFW_KEY_Q)) dir.y -= 1;
+  }
   if (dir != glm::vec3(0.0f)) {
     // Speed in scene units per second, times dt: the distance covered does not depend on the FPS.
     const float sceneSize = 2.0f * scene_.focusRadius;  // the subject's size, not the background's
@@ -445,13 +655,34 @@ void App::handleInput(float dt, int fbHeight) {
     camera_.move(glm::normalize(dir), speed * dt, flyMode_);
   }
   if (pressed(GLFW_KEY_F5)) reloadShaders();
+  if (pressed(GLFW_KEY_F1)) showShortcuts_ = !showShortcuts_;
   if (pressed(GLFW_KEY_F)) {
     flyMode_ = !flyMode_;  // the camera state is shared, so the view does not jump
-    status_ = flyMode_ ? "Fly mode: drag to look, WASD/QE move, wheel = speed (F: back to orbit)" : "Orbit mode";
+    status_ = flyMode_ ? tr("Fly mode: drag to look, WASD/QE move, wheel = speed (F: back to orbit)") : tr("Orbit mode");
   }
-  if (pressed(GLFW_KEY_R)) frameScene();
-  const bool ctrl = down(GLFW_KEY_LEFT_CONTROL) || down(GLFW_KEY_RIGHT_CONTROL);
-  if (pressed(GLFW_KEY_Z) && ctrl) undoEdit();
+  const bool ctrl = ctrlHeld;  // read once: sticky keys report a tap only to the first read
+  const bool shiftKey = down(GLFW_KEY_LEFT_SHIFT) || down(GLFW_KEY_RIGHT_SHIFT);
+  if (pressed(GLFW_KEY_R)) {
+    if (shiftKey) {
+      frameSelection();
+    } else {  // smooth: compute the framed camera, then fly there
+      const OrbitCamera before = camera_;
+      frameScene();
+      const OrbitCamera end = camera_;
+      camera_ = before;
+      animateCameraTo(end);
+    }
+  }
+  // Quick views (numpad, like Blender): 1 front, 3 right, 7 top; Ctrl = opposite side.
+  if (pressed(GLFW_KEY_KP_1)) quickView(2, ctrl);
+  if (pressed(GLFW_KEY_KP_3)) quickView(0, ctrl);
+  if (pressed(GLFW_KEY_KP_7)) quickView(1, ctrl);
+  const bool altKey = down(GLFW_KEY_LEFT_ALT) || down(GLFW_KEY_RIGHT_ALT);
+  const bool zPressed = pressed(GLFW_KEY_Z), yPressed = pressed(GLFW_KEY_Y);
+  if (zPressed && ctrl) shiftKey ? redoEdit() : undoEdit();
+  if (yPressed && ctrl) redoEdit();
+  if (pressed(GLFW_KEY_M)) setTool(tool_ == Tool::Measure ? Tool::Navigate : Tool::Measure);
+  handleToolKeys(ctrl, shiftKey, altKey);  // tools_ui.cpp: 1-9, Esc, Delete, H, Ctrl+A/D/I/S...
   if (pressed(GLFW_KEY_TAB)) mode_ = mode_ == RenderMode::Splats ? RenderMode::Points : RenderMode::Splats;
   if (pressed(GLFW_KEY_C)) goToCamera(cameraIndex_ + (down(GLFW_KEY_LEFT_SHIFT) ? -1 : 1));  // training cameras
 }

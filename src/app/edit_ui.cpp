@@ -2,8 +2,10 @@
 //
 // The selection volume is defined in display space (after the model matrix that levels the
 // scene), so a box stays aligned with the floor the user sees even for rotated COLMAP scenes.
-// Edits replace the scene and keep the previous one for a single-step undo (moved, not copied).
+// Every edit goes through history_ (scene/edit_history.h): multi-level undo / redo that stores only
+// the splats an edit touched.
 #include "app/app.h"
+#include "core/i18n.h"
 #include "core/utf8_path.h"
 #include "scene/ply_io.h"
 
@@ -23,26 +25,33 @@ void App::resetSelection() {
 }
 
 void App::uploadScene() {
+  setLodEnabled(false);  // edits change the scene the LOD tree was built from
+  lodTree_ = {};
   points_.upload(scene_);
   splats_.upload(scene_);
   selectionDirty_ = true;
   selectionDirtyForFilter_ = true;
+  editTreeValid_ = false;
+  // Removing / restoring splats changes the indices: a selection would point at other splats.
+  if (selected_.size() != scene_.size()) selected_.assign(scene_.size(), 0);
+  if (hidden_.size() != scene_.size()) hidden_.assign(scene_.size(), 0);
+  selectionChanged();
 }
 
 void App::applyRemoval(const SplatMask& mask, const char* what) {
   const size_t n = countSelected(mask);
   if (n == 0) {
-    status_ = std::string(what) + ": nothing selected";
+    status_ = std::string(tr(what)) + tr(": nothing selected");
     return;
   }
   const auto t0 = std::chrono::steady_clock::now();
-  undoScene_ = std::move(scene_);  // the old scene becomes the undo state (no copy)
-  scene_ = removeSelected(undoScene_, mask);
+  finishLiveEdit(true);
+  history_.remove(scene_, mask, what);
+  selected_.clear();  // indices changed
   uploadScene();
-  undoLabel_ = what;
   const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   char buf[160];
-  std::snprintf(buf, sizeof(buf), "%s: removed %zu splats, %zu left (%.0f ms)", what, n, scene_.size(), ms);
+  std::snprintf(buf, sizeof(buf), tr("%s: removed %zu splats, %zu left (%.0f ms)"), tr(what), n, scene_.size(), ms);
   status_ = buf;
 }
 
@@ -72,16 +81,31 @@ void App::applyBatchEdits() {
 }
 
 void App::undoEdit() {
-  if (undoScene_.empty()) return;
-  std::swap(scene_, undoScene_);
-  undoScene_ = {};  // single step: the edited scene is dropped
+  finishLiveEdit(true);
+  if (!history_.canUndo()) {
+    status_ = tr("Nothing to undo");
+    return;
+  }
+  const std::string label = history_.undoLabel();
+  history_.undo(scene_);
   uploadScene();
-  status_ = "Undo: " + undoLabel_ + " (" + std::to_string(scene_.size()) + " splats)";
-  undoLabel_.clear();
+  status_ = std::string(tr("Undo")) + ": " + tr(label.c_str()) + " (" + std::to_string(scene_.size()) + " " + tr("splats") + ")";
+}
+
+void App::redoEdit() {
+  finishLiveEdit(true);
+  if (!history_.canRedo()) {
+    status_ = tr("Nothing to redo");
+    return;
+  }
+  const std::string label = history_.redoLabel();
+  history_.redo(scene_);
+  uploadScene();
+  status_ = std::string(tr("Redo")) + ": " + tr(label.c_str()) + " (" + std::to_string(scene_.size()) + " " + tr("splats") + ")";
 }
 
 void App::drawEditPanel() {
-  if (!ImGui::CollapsingHeader("Edit")) {
+  if (!ImGui::CollapsingHeader(trId("Crop & filter"))) {
     showSelection_ = false;
     return;
   }
@@ -89,19 +113,19 @@ void App::drawEditPanel() {
 
   // ---- Selection volume ----------------------------------------------------------
   int type = selection_.type == SelectionShape::Type::Box ? 0 : 1;
-  bool changed = ImGui::RadioButton("Box", &type, 0);
+  bool changed = ImGui::RadioButton(trId("Box"), &type, 0);
   ImGui::SameLine();
-  changed |= ImGui::RadioButton("Sphere", &type, 1);
+  changed |= ImGui::RadioButton(trId("Sphere"), &type, 1);
   selection_.type = type == 0 ? SelectionShape::Type::Box : SelectionShape::Type::Sphere;
   ImGui::SameLine();
-  if (ImGui::Button("Reset to scene")) resetSelection();
+  if (ImGui::Button(trId("Reset to scene"))) resetSelection();
   const float speed = 0.005f * std::max(scene_.focusRadius, 1e-3f);
-  changed |= ImGui::DragFloat3("Center", &selection_.center.x, speed);
+  changed |= ImGui::DragFloat3(trId("Center"), &selection_.center.x, speed);
   if (selection_.type == SelectionShape::Type::Box)
-    changed |= ImGui::DragFloat3("Half size", &selection_.halfExtent.x, speed, 0.0f, 1e6f);
+    changed |= ImGui::DragFloat3(trId("Half size"), &selection_.halfExtent.x, speed, 0.0f, 1e6f);
   else
-    changed |= ImGui::DragFloat("Radius", &selection_.radius, speed, 0.0f, 1e6f);
-  if (ImGui::Button("Center on view target")) {
+    changed |= ImGui::DragFloat(trId("Radius"), &selection_.radius, speed, 0.0f, 1e6f);
+  if (ImGui::Button(trId("Center on view target"))) {
     selection_.center = camera_.target;
     changed = true;
   }
@@ -110,35 +134,41 @@ void App::drawEditPanel() {
     selectionCount_ = countSelected(selectInside(scene_, selection_, modelMatrix()));
     selectionDirty_ = false;
   }
-  ImGui::Text("%zu splats inside, %zu outside", selectionCount_, scene_.size() - selectionCount_);
+  ImGui::Text(tr("%zu splats inside, %zu outside"), selectionCount_, scene_.size() - selectionCount_);
 
-  if (ImGui::Button("Delete inside")) applyRemoval(selectInside(scene_, selection_, modelMatrix()), "Delete inside");
+  if (ImGui::Button(trId("Delete inside"))) applyRemoval(selectInside(scene_, selection_, modelMatrix()), "Delete inside");
   ImGui::SameLine();
-  if (ImGui::Button("Crop (delete outside)")) {
+  if (ImGui::Button(trId("Crop (delete outside)"))) {
     SplatMask m = selectInside(scene_, selection_, modelMatrix());
     invert(m);
     applyRemoval(m, "Crop");
   }
 
   // ---- Filters --------------------------------------------------------------------
-  ImGui::SeparatorText("Filter floaters");
-  ImGui::TextDisabled("Nearly transparent or huge splats (typical floaters)");
-  bool filterChanged = ImGui::SliderFloat("Min opacity", &filterOpacity_, 0.0f, 0.5f, "%.3f");
-  filterChanged |= ImGui::SliderFloat("Max size", &filterScale_, 0.0f, scene_.focusRadius,
+  ImGui::SeparatorText(tr("Filter floaters"));
+  ImGui::TextDisabled("%s", tr("Nearly transparent or huge splats (typical floaters)"));
+  bool filterChanged = ImGui::SliderFloat(trId("Min opacity"), &filterOpacity_, 0.0f, 0.5f, "%.3f");
+  filterChanged |= ImGui::SliderFloat(trId("Max size"), &filterScale_, 0.0f, scene_.focusRadius,
                                       filterScale_ > 0.0f ? "%.3f" : "off");
   if (filterChanged || selectionDirtyForFilter_) {
     filterCount_ = countSelected(selectByFilter(scene_, filterOpacity_, filterScale_));
     selectionDirtyForFilter_ = false;
   }
   char label[96];
-  std::snprintf(label, sizeof(label), "Delete %zu filtered splats", filterCount_);
+  std::snprintf(label, sizeof(label), tr("Delete %zu filtered splats"), filterCount_);
   if (ImGui::Button(label)) applyRemoval(selectByFilter(scene_, filterOpacity_, filterScale_), "Filter");
 
   // ---- Undo / save ----------------------------------------------------------------
   ImGui::Separator();
-  ImGui::BeginDisabled(undoScene_.empty());
-  if (ImGui::Button(undoLabel_.empty() ? "Undo" : ("Undo " + undoLabel_).c_str())) undoEdit();
+  ImGui::BeginDisabled(!history_.canUndo());
+  if (ImGui::Button(history_.canUndo() ? ("Undo " + history_.undoLabel()).c_str() : "Undo")) undoEdit();
   ImGui::EndDisabled();
+  ImGui::SameLine();
+  ImGui::BeginDisabled(!history_.canRedo());
+  if (ImGui::Button(history_.canRedo() ? ("Redo " + history_.redoLabel()).c_str() : "Redo")) redoEdit();
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  ImGui::TextDisabled(tr("%zu step(s), %.1f MB"), history_.size(), static_cast<double>(history_.bytes()) / 1e6);
   if (savePath_[0] == 0 && !scenePath_.empty()) {
     const std::filesystem::path p = pathFromUtf8(scenePath_);
     const std::string def = pathToUtf8(p.parent_path() / (pathToUtf8(p.stem()) + "_edited.ply"));
@@ -147,18 +177,9 @@ void App::drawEditPanel() {
   ImGui::SetNextItemWidth(-60);
   ImGui::InputText("##save", savePath_, sizeof(savePath_));
   ImGui::SameLine();
-  if (ImGui::Button("Save")) {
-    std::string error;
-    const auto t0 = std::chrono::steady_clock::now();
-    if (savePly(pathFromUtf8(savePath_), scene_, error)) {
-      const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-      char buf[128];
-      std::snprintf(buf, sizeof(buf), "Saved %zu splats (%.0f ms)", scene_.size(), ms);
-      status_ = buf;
-    } else {
-      status_ = "Save failed: " + error;
-    }
-  }
+  ImGui::BeginDisabled(saveJob_.valid());
+  if (ImGui::Button(saveJob_.valid() ? trId("Saving...") : trId("Save"))) startSceneSave(savePath_);  // background
+  ImGui::EndDisabled();
 }
 
 // Wireframe of the selection volume with ImGui's background draw list (like the camera frustums).

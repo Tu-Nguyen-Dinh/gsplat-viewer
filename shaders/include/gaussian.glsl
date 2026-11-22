@@ -62,6 +62,7 @@ struct Projection {
     vec2 axisMajor;   // 3-sigma half axes in pixels
     vec2 axisMinor;
     float radius;
+    vec2 depthGradient; // d(depth)/d(pixel): conditional mean of the depth given the pixel (Core 1)
 };
 
 // EWA splatting: Sigma' = J W Sigma W^T J^T  (see gaussian_math.cpp for the derivation).
@@ -86,6 +87,10 @@ Projection projectGaussian(vec3 mean, mat3 cov, mat4 view, vec2 viewport, vec2 f
     float a = j00 * j00 * S[0][0] + 2.0 * j00 * j02 * S[2][0] + j02 * j02 * S[2][2];
     float b = j00 * j11 * S[1][0] + j00 * j12 * S[2][0] + j02 * j11 * S[2][1] + j02 * j12 * S[2][2];
     float c = j11 * j11 * S[1][1] + 2.0 * j11 * j12 * S[2][1] + j12 * j12 * S[2][2];
+    // Inverse of the undilated 2D covariance, for the depth gradient below (dilation is an
+    // anti-aliasing blur of the footprint, not part of the surface's geometry).
+    float det0 = a * c - b * b;
+    vec3 conic0 = det0 > 1e-12 ? vec3(c, -b, a) / det0 : vec3(0.0);
     a += kScreenDilation;
     c += kScreenDilation;
 
@@ -95,6 +100,10 @@ Projection projectGaussian(vec3 mean, mat3 cov, mat4 view, vec2 viewport, vec2 f
     o.center = vec2(focal.x * t.x / z, focal.y * t.y / z) + principal;
     o.depth = z;
     o.conic = vec3(c, -b, a) / det;
+    // Depth along a pixel ray through a 3D Gaussian is (in the linearized projection) Gaussian too;
+    // its mean at screen offset du is z + g.du with g = Sigma_uu^-1 Cov(z, u), Cov(z, u) = -e_z^T S J^T.
+    vec2 czu = -vec2(j00 * S[2][0] + j02 * S[2][2], j11 * S[2][1] + j12 * S[2][2]);
+    o.depthGradient = vec2(conic0.x * czu.x + conic0.y * czu.y, conic0.y * czu.x + conic0.z * czu.y);
     ellipseAxes(a, b, c, o.axisMajor, o.axisMinor);
     o.radius = ceil(length(o.axisMajor));
 

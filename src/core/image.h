@@ -41,4 +41,15 @@ bool readPpmFrame(std::FILE* stream, Image& out, bool& error);
 // one whitespace byte ends a field, so after the last one the binary pixels start.
 bool readPnmNumber(std::FILE* stream, int& value);
 
+// Expected depth (view-space distance along the camera axis) and coverage (1 - transmittance) per
+// pixel, rows top-down like Image. depth = 0 where coverage is 0. Produced by the GPU depth output
+// (gl/framebuffer.h) and by the CPU reference renderer; consumed by picking (core/picking.h).
+struct DepthImage {
+  int width = 0, height = 0;
+  std::vector<float> depth, coverage;
+  bool empty() const { return depth.empty(); }
+  float depthAt(int x, int y) const { return depth[static_cast<size_t>(y) * width + x]; }
+  float coverageAt(int x, int y) const { return coverage[static_cast<size_t>(y) * width + x]; }
+};
+
 }  // namespace gsv

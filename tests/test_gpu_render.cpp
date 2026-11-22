@@ -31,6 +31,29 @@ RenderView makeView(const GaussianScene& scene, float yaw, float distanceScale) 
   return v;
 }
 
+// Same scene, splats in a random (seeded) order.
+GaussianScene shuffled(const GaussianScene& in, uint32_t seed) {
+  std::vector<size_t> perm(in.size());
+  for (size_t i = 0; i < perm.size(); ++i) perm[i] = i;
+  uint32_t state = seed;
+  for (size_t i = perm.size(); i > 1; --i) {
+    state = state * 1664525u + 1013904223u;
+    std::swap(perm[i - 1], perm[state % i]);
+  }
+  GaussianScene out = in;
+  const size_t rest = static_cast<size_t>(in.shRestPerChannel) * 3;
+  for (size_t i = 0; i < perm.size(); ++i) {
+    const size_t j = perm[i];
+    out.position[i] = in.position[j];
+    out.logScale[i] = in.logScale[j];
+    out.rotation[i] = in.rotation[j];
+    out.opacityLogit[i] = in.opacityLogit[j];
+    out.shDC[i] = in.shDC[j];
+    for (size_t k = 0; k < rest; ++k) out.shRest[i * rest + k] = in.shRest[j * rest + k];
+  }
+  return out;
+}
+
 Image renderGpu(SplatRenderer& r, const RenderView& view, const SplatSettings& s, Framebuffer::Format format) {
   Framebuffer fb;
   fb.create(kW, kH, format);
@@ -83,8 +106,13 @@ GPU_TEST_CASE(gpu_render_matches_cpu_reference) {
                 yaw, p16, maxAbsDifference(ref, gpu16), p10, p8, maxAbsDifference(ref, gpu8));
     CHECK(p16 > 40.0);
     CHECK(p8 > 33.0);
-    CHECK(p10 > p8);  // blending precision: 10 bits beats 8 bits
-    CHECK(p16 > p8);
+    if (test::softwareRenderer()) {
+      // llvmpipe blends 8-bit targets without the per-blend rounding loss of real GPUs.
+      std::printf("    (software renderer: 8-bit vs 10/16-bit precision ordering not asserted)\n");
+    } else {
+      CHECK(p10 > p8);  // blending precision: 10 bits beats 8 bits
+      CHECK(p16 > p8);
+    }
     if (!previousRef.rgb.empty()) CHECK(psnr(previousRef, ref) < 25.0);  // the two views really differ
     previousRef = ref;
     saveForInspection(yaw < 1.0f ? "reference_a.png" : "reference_b.png", ref);
@@ -139,10 +167,15 @@ GPU_TEST_CASE(gpu_square_quads_match_reference) {
 GPU_TEST_CASE(unsorted_render_is_detected) {
   // "Test the test": without sorting the image must be clearly different,
   // otherwise the comparison above could not detect ordering bugs.
-  const GaussianScene scene = makeDemoScene(20000, 21);
+  // The splats are shuffled and uploaded uncompressed (the compressed format reorders them along a
+  // Morton curve): the unsorted visible-list order then has no relation to depth on every driver.
+  // A driver whose atomics preserve index order (llvmpipe) would otherwise draw the spatially
+  // coherent Morton order, which composites almost correctly (41 dB measured).
+  const GaussianScene scene = shuffled(makeDemoScene(20000, 21), 1234u);
   SplatRenderer renderer;
   std::string log;
   CHECK(renderer.init(log));
+  renderer.setCompressed(false);
   renderer.upload(scene);
   const RenderView view = makeView(scene, 0.6f, 0.8f);
   SplatSettings s;

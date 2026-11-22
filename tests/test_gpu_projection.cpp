@@ -5,6 +5,8 @@
 #include "core/half.h"
 #include "render/splat_renderer.h"
 #include "scene/demo_scene.h"
+#include "scene/edit_ops.h"
+#include <glm/gtc/matrix_transform.hpp>
 #include "test_framework.h"
 
 #include <algorithm>
@@ -169,3 +171,128 @@ GPU_TEST_CASE(gpu_visible_list_is_a_permutation) {
   CHECK(std::adjacent_find(order.begin(), order.end()) == order.end());  // no duplicates
   CHECK(visible == 0 || order.back() < scene.size());
 }
+
+// Core 5 (ER 5.11): edit flags. Selected splats get the highlight colour, hidden splats are culled,
+// in both formats (the compressed one re-orders splats: flags must follow the Morton order).
+static void checkSelectionFlags(bool compressed) {
+  const GaussianScene scene = makeDemoScene(4000, 3);
+  SplatRenderer renderer;
+  std::string log;
+  REQUIRE(renderer.init(log));
+  renderer.setCompressed(compressed);
+  renderer.upload(scene);
+  const RenderView view = testView(scene, 0.4f);
+  SplatSettings settings;
+  settings.cullOutsideViewport = false;
+  auto run = [&](std::vector<ProjectedSplatCpu>& out, uint32_t& visible) {
+    renderer.preprocess(view, settings);
+    out.resize(scene.size());
+    renderer.projectedBuffer().download(0, out.size() * sizeof(ProjectedSplatCpu), out.data());
+    renderer.drawCommandBuffer().download(4, sizeof(uint32_t), &visible);
+  };
+  std::vector<ProjectedSplatCpu> base, flagged;
+  uint32_t visibleBase = 0, visibleFlagged = 0;
+  run(base, visibleBase);
+  std::vector<uint8_t> flags(scene.size(), 0);
+  size_t hiddenVisible = 0;
+  const std::vector<uint32_t>& g2s = renderer.gpuToScene();
+  REQUIRE(g2s.size() == scene.size());
+  for (size_t i = 0; i < scene.size(); ++i) flags[i] = i % 3 == 0 ? 1 : (i % 7 == 0 ? 2 : 0);
+  for (size_t k = 0; k < scene.size(); ++k)
+    if (flags[g2s[k]] == 2 && base[k].visible()) ++hiddenVisible;
+  renderer.setSelectionFlags(flags);
+  CHECK(renderer.hasSelectionFlags());
+  run(flagged, visibleFlagged);
+  CHECK(visibleFlagged + hiddenVisible == visibleBase);
+  float maxErr = 0.0f;
+  size_t wrong = 0;
+  for (size_t k = 0; k < scene.size(); ++k) {
+    const uint8_t f = flags[g2s[k]];
+    if (f == 2) {
+      wrong += flagged[k].visible();
+      continue;
+    }
+    if (!base[k].visible()) continue;
+    const glm::vec3 expect = f == 1 ? glm::mix(base[k].color(), glm::vec3(settings.highlight), settings.highlight.a)
+                                    : base[k].color();
+    maxErr = std::max(maxErr, glm::length(flagged[k].color() - expect));
+  }
+  CHECK(wrong == 0);
+  CHECK(maxErr < 4e-3f);  // fp16 colour storage
+  // Clearing restores the original output.
+  renderer.clearSelectionFlags();
+  run(flagged, visibleFlagged);
+  CHECK(visibleFlagged == visibleBase);
+  // Wrong size: ignored.
+  renderer.setSelectionFlags(std::vector<uint8_t>(3, 1));
+  CHECK(!renderer.hasSelectionFlags());
+}
+GPU_TEST_CASE(gpu_selection_flags_fp32) { checkSelectionFlags(false); }
+GPU_TEST_CASE(gpu_selection_flags_compressed) { checkSelectionFlags(true); }
+
+// Phase 6 (ER 6.14): the live gizmo preview on the GPU draws exactly what transforming the data on
+// the CPU would draw: same centres, ellipses and view-dependent colours, for the selected splats only.
+static void checkTransformPreview(bool compressed) {
+  const GaussianScene scene = makeDemoScene(3000, 3);
+  const RenderView view = testView(scene, 0.7f);
+  SplatSettings settings;
+  settings.cullOutsideViewport = false;
+  std::vector<uint8_t> flags(scene.size(), 0);
+  SplatMask mask(scene.size(), 0);
+  for (size_t i = 0; i < scene.size(); i += 2) flags[i] = mask[i] = 1;
+  const glm::vec3 c = 0.5f * (scene.boundsMin + scene.boundsMax);
+  const glm::mat4 T = glm::translate(glm::mat4(1.0f), c + glm::vec3(0.3f, 0.1f, -0.2f)) *
+                      glm::rotate(glm::mat4(1.0f), 0.6f, glm::normalize(glm::vec3(0.2f, 1.0f, 0.1f))) *
+                      glm::scale(glm::mat4(1.0f), glm::vec3(1.3f)) * glm::translate(glm::mat4(1.0f), -c);
+  auto project = [&](const GaussianScene& s, bool preview) -> std::vector<ProjectedSplatCpu> {
+    SplatRenderer r;
+    std::string log;
+    if (!r.init(log)) return {};
+    r.setCompressed(compressed);
+    r.upload(s);
+    r.setSelectionFlags(flags);
+    SplatSettings st = settings;
+    st.highlight.a = 0.0f;  // compare true colours
+    st.previewActive = preview;
+    st.previewAffine = T;
+    r.preprocess(view, st);
+    std::vector<ProjectedSplatCpu> gpu(s.size()), byScene(s.size());
+    r.projectedBuffer().download(0, gpu.size() * sizeof(ProjectedSplatCpu), gpu.data());
+    for (size_t k = 0; k < gpu.size(); ++k) byScene[r.gpuToScene()[k]] = gpu[k];
+    return byScene;
+  };
+  GaussianScene moved = scene;
+  transformSplats(moved, mask, T);
+  const auto a = project(scene, true), b = project(moved, false);
+  REQUIRE(a.size() == scene.size() && b.size() == scene.size());
+  float centerErr = 0.0f, conicErr = 0.0f, colorErr = 0.0f;
+  size_t compared = 0, visibilityMismatch = 0;
+  for (size_t i = 0; i < scene.size(); ++i) {
+    if (a[i].visible() != b[i].visible()) {
+      ++visibilityMismatch;
+      continue;
+    }
+    if (!a[i].visible()) continue;
+    ++compared;
+    centerErr = std::max(centerErr, glm::length(glm::vec2(a[i].centerConic) - glm::vec2(b[i].centerConic)));
+    const glm::vec3 ca = a[i].conic(), cb = b[i].conic();
+    conicErr = std::max(conicErr, glm::length(ca - cb) / std::max(glm::length(cb), 1e-6f));
+    colorErr = std::max(colorErr, glm::length(a[i].color() - b[i].color()));
+  }
+  std::printf("    preview vs CPU (%s): %zu splats, centre %.3g px, conic %.3g rel, colour %.3g, visibility diff %zu\n",
+              compressed ? "compressed" : "fp32", compared, static_cast<double>(centerErr), static_cast<double>(conicErr),
+              static_cast<double>(colorErr), visibilityMismatch);
+  CHECK(compared > scene.size() / 2);
+  if (!compressed) {
+    CHECK(visibilityMismatch == 0);
+    CHECK(centerErr < 1e-2f);
+    CHECK(conicErr < 1e-3f);
+    CHECK(colorErr < 4e-3f);  // fp16 colour storage
+  } else {  // the CPU path re-quantises the moved splats (24-byte codec): compare within codec error
+    CHECK(visibilityMismatch <= scene.size() / 500);
+    CHECK(centerErr < 0.5f);
+    CHECK(colorErr < 0.03f);
+  }
+}
+GPU_TEST_CASE(gpu_transform_preview_fp32) { checkTransformPreview(false); }
+GPU_TEST_CASE(gpu_transform_preview_compressed) { checkTransformPreview(true); }
